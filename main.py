@@ -70,6 +70,34 @@ def print_no_solutions():
 
 # ── Main pipeline ──────────────────────────────────────────────────────────
 
+from dataclasses import dataclass, field
+
+
+@dataclass
+class ExerciseDiagnostic:
+    """Diagnostic info for one exercise region."""
+    region_index: int
+    region_box: tuple = ()          # (x, y, w, h)
+    text_ocr: str = ""              # Tesseract output
+    math_latex: str = ""            # Pix2Tex output
+    parsed_expressions: list = field(default_factory=list)
+    parsed_equations: list = field(default_factory=list)
+    unparsed: list = field(default_factory=list)
+    context: dict = field(default_factory=dict)
+    solutions: list = field(default_factory=list)
+    error: str = ""
+
+
+@dataclass
+class PipelineResult:
+    """Full result from the pipeline, including diagnostics."""
+    solutions: list = field(default_factory=list)
+    diagnostics: list = field(default_factory=list)
+    image_path: str = ""
+    num_regions: int = 0
+    error: str = ""
+
+
 def run_pipeline(
     image_path: str,
     lang: str = DEFAULT_LANGUAGE,
@@ -77,7 +105,7 @@ def run_pipeline(
     generate_pdf: bool = False,
     pdf_output: str = None,
     verbose: bool = True,
-) -> list:
+) -> PipelineResult:
     """
     Run the full solve pipeline on an image.
 
@@ -87,10 +115,10 @@ def run_pipeline(
         use_latex: Whether to use Pix2Tex for math OCR.
         generate_pdf: Whether to generate a PDF output.
         pdf_output: Custom PDF output path.
-        verbose: Whether to print progress.
+        verbose: Whether to print progress to terminal.
 
     Returns:
-        List of Solution objects.
+        PipelineResult with solutions and full diagnostics.
     """
     from preprocessing import segment_exercises, crop_region, save_crops, display_regions
     from ocr_engine import ocr_all_exercises, print_ocr_status
@@ -98,7 +126,7 @@ def run_pipeline(
     from solver import solve_problem, Solution, Step
     from handwriting import render_solutions_pdf
 
-    all_solutions = []
+    result = PipelineResult(image_path=image_path)
 
     # Step 1: Load and segment
     if verbose:
@@ -107,15 +135,19 @@ def run_pipeline(
 
     try:
         img, regions, binary = segment_exercises(image_path)
-    except FileNotFoundError as e:
-        print(f"{Colors.RED}Error: {e}{Colors.END}")
-        return all_solutions
-    except ValueError as e:
-        print(f"{Colors.RED}Error: {e}{Colors.END}")
-        return all_solutions
+    except Exception as e:
+        msg = f"Failed to load image: {e}"
+        result.error = msg
+        if verbose:
+            print(f"{Colors.RED}Error: {msg}{Colors.END}")
+        return result
+
+    result.num_regions = len(regions)
 
     if verbose:
         print(f"  Found {len(regions)} exercise region(s)")
+        for i, r in enumerate(regions):
+            print(f"    Region {i+1}: x={r[0]}, y={r[1]}, w={r[2]}, h={r[3]}")
 
     # Save crops for debugging
     crop_dir = os.path.join(OUTPUT_DIR, "crops")
@@ -125,7 +157,6 @@ def run_pipeline(
     if verbose:
         print(f"\n{Colors.BOLD}Step 2: Running OCR...{Colors.END}")
 
-    # Convert regions to numpy crops
     crops = [crop_region(img, r) for r in regions]
     ocr_results = ocr_all_exercises(crops, use_latex=use_latex)
 
@@ -135,17 +166,28 @@ def run_pipeline(
 
     for i, ocr_result in enumerate(ocr_results):
         text = ocr_result["text"]
-        math_latex = ocr_result.get("math_latex")
+        math_latex = ocr_result.get("math_latex") or ""
+
+        diag = ExerciseDiagnostic(
+            region_index=i,
+            region_box=regions[i] if i < len(regions) else (),
+            text_ocr=text,
+            math_latex=math_latex,
+        )
 
         if verbose:
             print(f"\n  --- Exercise {i + 1} ---")
             if text:
-                print(f"  Text OCR:    {text[:100]}{'...' if len(text) > 100 else ''}")
+                print(f"  Text OCR:    {text[:200]}{'...' if len(text) > 200 else ''}")
             if math_latex:
                 print(f"  Math OCR:    {math_latex}")
 
         # Parse
         parsed = parse_exercise(text, math_latex)
+        diag.parsed_expressions = [str(e) for e in parsed["expressions"]]
+        diag.parsed_equations = [(str(l), op, str(r)) for l, op, r in parsed["equations"]]
+        diag.unparsed = parsed["unparsed"]
+        diag.context = {k: v for k, v in parsed["context"].items() if k != "problem_text"}
 
         if verbose:
             if parsed["expressions"]:
@@ -163,28 +205,30 @@ def run_pipeline(
             lang=lang,
         )
 
-        all_solutions.extend(solutions)
+        diag.solutions = solutions
+        result.diagnostics.append(diag)
+        result.solutions.extend(solutions)
 
         if verbose:
             for sol in solutions:
-                print_solution(sol, len(all_solutions))
+                print_solution(sol, len(result.solutions))
 
     # Print summary
     if verbose:
         print(f"\n{Colors.BOLD}{'=' * 70}{Colors.END}")
-        solved = sum(1 for s in all_solutions if s.is_valid)
-        print(f"  Total: {len(all_solutions)} exercise(s), {solved} solved successfully")
+        solved = sum(1 for s in result.solutions if s.is_valid)
+        print(f"  Total: {len(result.solutions)} exercise(s), {solved} solved successfully")
         print(f"{Colors.BOLD}{'=' * 70}{Colors.END}\n")
 
     # Step 4: Generate PDF if requested
-    if generate_pdf and all_solutions:
+    if generate_pdf and result.solutions:
         if verbose:
             print(f"\n{Colors.BOLD}Step 4: Generating handwriting PDF...{Colors.END}")
-        pdf_path = render_solutions_pdf(all_solutions, pdf_output, lang=lang)
+        pdf_path = render_solutions_pdf(result.solutions, pdf_output, lang=lang)
         if verbose:
             print(f"  Saved to: {pdf_path}")
 
-    return all_solutions
+    return result
 
 
 # ── CLI argument parsing ──────────────────────────────────────────────────
@@ -245,7 +289,7 @@ def main():
         print(f"Error: file not found: {args.image}")
         sys.exit(1)
 
-    solutions = run_pipeline(
+    result = run_pipeline(
         image_path=args.image,
         lang=args.lang,
         use_latex=not args.no_latex,
@@ -254,7 +298,7 @@ def main():
         verbose=not args.quiet,
     )
 
-    if not solutions or all(not s.is_valid for s in solutions):
+    if not result.solutions or all(not s.is_valid for s in result.solutions):
         print_no_solutions()
         sys.exit(1)
 
