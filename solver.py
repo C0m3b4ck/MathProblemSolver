@@ -228,64 +228,193 @@ def solve_percentage_reverse(part: float, whole: float, lang: str = "pl") -> Sol
 #  LINEAR EQUATION SOLVER
 # ═══════════════════════════════════════════════════════════════════════════
 
-def solve_linear_equation(lhs, rhs, lang: str = "pl") -> Solution:
+def solve_linear_equation(lhs, rhs, lang: str = "pl", verbose: bool = False) -> Solution:
     """
     Solve a linear equation ax + b = c step by step.
+    When verbose=True, shows exact equation state at every intermediate step.
     """
     x = symbols("x")
     problem = f"{sympy_to_text(lhs)} = {sympy_to_text(rhs)}"
     steps = []
 
     eq = Eq(lhs, rhs)
-    steps.append(_step(get_step("eq_start", lang, equation=problem)))
-
-    # Use SymPy to solve
     solutions = solve(eq, x)
 
     if not solutions:
+        steps.append(_step(get_step("eq_start", lang, equation=problem)))
         steps.append(_step(get_step("eq_no_solution", lang)))
         return Solution(problem, get_method_name("linear_equation", lang),
                         "linear_equation", steps, "Brak rozwiązań" if lang == "pl" else "No solution")
 
-    # Generate human-readable steps
-    # Collect all terms on left, simplify, then divide
-    expanded_lhs = expand(lhs - rhs)
-    steps.append(_step(get_step("expr_simplify", lang,
-                                original=f"{sympy_to_text(lhs)} - {sympy_to_text(rhs)}",
-                                result=f"{sympy_to_text(expanded_lhs)} = 0")))
+    if verbose:
+        # Verbose mode: show every intermediate step with full equation state
+        steps.append(_step(get_step("eq_start", lang, equation=problem)))
 
-    # Extract coefficient and constant
-    coeff = expanded_lhs.coeff(x, 1)
-    constant = expanded_lhs.coeff(x, 0)
+        # Collect terms: move everything to form coeff*x = constant
+        diff = expand(lhs - rhs)
+        coeff = diff.coeff(x, 1)
+        constant = diff.coeff(x, 0)
 
-    if coeff != 0:
-        if constant > 0:
-            steps.append(_step(get_step("eq_move_term", lang,
-                                        term=f"{sympy_to_text(constant)}",
-                                        direction=get_step("eq_move_right", lang),
-                                        result=f"{sympy_to_text(coeff)}·x = {sympy_to_text(-constant)}")))
-        elif constant < 0:
-            steps.append(_step(get_step("eq_move_term", lang,
-                                        term=f"{sympy_to_text(constant)}",
-                                        direction=get_step("eq_move_right", lang),
-                                        result=f"{sympy_to_text(coeff)}·x = {sympy_to_text(-constant)}")))
+        # Step: Move constant terms from LHS to RHS
+        if constant != 0:
+            direction = get_step("eq_move_right", lang)
+            moved = sympy_to_text(constant)
+            steps.append(_step(get_step("verbose_move", lang,
+                                         term=moved,
+                                         direction=direction,
+                                         result=f"{sympy_to_text(coeff)}·x = {sympy_to_text(-constant)}")))
 
+        # Step: Show combined form
+        if coeff != 1 or constant != 0:
+            steps.append(_step(get_step("verbose_combine", lang,
+                                         result=f"{sympy_to_text(coeff)}·x = {sympy_to_text(-constant)}")))
+
+        # Step: Divide both sides
         if coeff != 1:
-            steps.append(_step(get_step("eq_divide", lang,
-                                        divisor=sympy_to_text(coeff),
-                                        result=f"x = {sympy_to_text(-constant)} / {sympy_to_text(coeff)}")))
+            right_val = simplify(Rational(-constant, coeff))
+            steps.append(_step(get_step("verbose_divide_both", lang,
+                                         divisor=sympy_to_text(coeff),
+                                         left="x",
+                                         right=sympy_to_text(right_val))))
 
-    # Final answer
-    if len(solutions) == 1:
-        steps.append(_step(get_step("eq_solution", lang, solution=f"x = {sympy_to_text(solutions[0])}")))
-        answer = f"x = {sympy_to_text(solutions[0])}"
+        # Step: Final answer
+        if len(solutions) == 1:
+            steps.append(_step(get_step("eq_solution", lang, solution=f"x = {sympy_to_text(solutions[0])}")))
+            answer = f"x = {sympy_to_text(solutions[0])}"
+        else:
+            sol_strs = [f"x = {sympy_to_text(s)}" for s in solutions]
+            steps.append(_step(get_step("eq_solution", lang, solution=",  ".join(sol_strs))))
+            answer = ",  ".join(sol_strs)
     else:
-        sol_strs = [f"x = {sympy_to_text(s)}" for s in solutions]
-        steps.append(_step(get_step("eq_solution", lang, solution=",  ".join(sol_strs))))
-        answer = ",  ".join(sol_strs)
+        # Non-verbose mode (original behavior, condensed steps)
+        steps.append(_step(get_step("eq_start", lang, equation=problem)))
+
+        expanded_lhs = expand(lhs - rhs)
+        steps.append(_step(get_step("expr_simplify", lang,
+                                    original=f"{sympy_to_text(lhs)} - {sympy_to_text(rhs)}",
+                                    result=f"{sympy_to_text(expanded_lhs)} = 0")))
+
+        # Extract coefficient and constant
+        coeff = expanded_lhs.coeff(x, 1)
+        constant = expanded_lhs.coeff(x, 0)
+
+        if coeff != 0:
+            if constant > 0:
+                steps.append(_step(get_step("eq_move_term", lang,
+                                            term=f"{sympy_to_text(constant)}",
+                                            direction=get_step("eq_move_right", lang),
+                                            result=f"{sympy_to_text(coeff)}·x = {sympy_to_text(-constant)}")))
+            elif constant < 0:
+                steps.append(_step(get_step("eq_move_term", lang,
+                                            term=f"{sympy_to_text(constant)}",
+                                            direction=get_step("eq_move_right", lang),
+                                            result=f"{sympy_to_text(coeff)}·x = {sympy_to_text(-constant)}")))
+
+            if coeff != 1:
+                steps.append(_step(get_step("eq_divide", lang,
+                                            divisor=sympy_to_text(coeff),
+                                            result=f"x = {sympy_to_text(-constant)} / {sympy_to_text(coeff)}")))
+
+        # Final answer
+        if len(solutions) == 1:
+            steps.append(_step(get_step("eq_solution", lang, solution=f"x = {sympy_to_text(solutions[0])}")))
+            answer = f"x = {sympy_to_text(solutions[0])}"
+        else:
+            sol_strs = [f"x = {sympy_to_text(s)}" for s in solutions]
+            steps.append(_step(get_step("eq_solution", lang, solution=",  ".join(sol_strs))))
+            answer = ",  ".join(sol_strs)
 
     return Solution(problem, get_method_name("linear_equation", lang),
                     "linear_equation", steps, answer)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  LINEAR EQUATION SOLVER — EASY MODE (fraction clearing)
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _has_fractions(lhs, rhs):
+    """Check if equation has fractional coefficients."""
+    x = symbols('x')
+    diff = expand(lhs - rhs)
+    # Check if any coefficient is a Rational with denominator > 1
+    for term in diff.as_ordered_terms():
+        coeff = term.coeff(x, 0) if term.is_number else term.coeff(x, 1)
+        if isinstance(coeff, Rational) and coeff.q != 1:
+            return True
+    return False
+
+
+def _get_denominators(lhs, rhs):
+    """Get all unique denominators from the equation."""
+    x = symbols('x')
+    diff = expand(lhs - rhs)
+    denoms = set()
+    for term in diff.as_ordered_terms():
+        # Get the rational coefficient
+        if term.is_number:
+            coeff = Rational(term)
+        else:
+            coeff = Rational(term.as_independent(x)[0])
+        if isinstance(coeff, Rational):
+            denoms.add(coeff.q)
+    denoms.discard(1)  # Remove trivial denominators
+    return denoms
+
+
+def _compute_lcd(denominators):
+    """Compute LCM of a set of denominators."""
+    result = 1
+    for d in denominators:
+        result = result * d // math.gcd(result, d)
+    return result
+
+
+def solve_linear_equation_easy(lhs, rhs, lang: str = "pl") -> Solution:
+    """
+    Solve a linear equation by first clearing fractions (LCD method).
+    If no fractions are detected, falls back to standard solving.
+
+    Example: x/3 + x/6 = 5
+      LCD(3,6) = 6
+      6·(x/3 + x/6) = 6·5  →  2x + x = 30  →  x = 10
+    """
+    x = symbols("x")
+    problem = f"{sympy_to_text(lhs)} = {sympy_to_text(rhs)}"
+    steps = []
+
+    if _has_fractions(lhs, rhs):
+        denoms = _get_denominators(lhs, rhs)
+        if denoms:
+            lcd = _compute_lcd(denoms)
+
+            steps.append(_step(get_step("eq_start", lang, equation=problem)))
+            steps.append(_step(get_step("frac_clear_detect", lang)))
+            steps.append(_step(get_step("frac_clear_lcd", lang, lcd=lcd)))
+
+            # Show multiplication step
+            new_lhs = cancel(lhs * lcd)
+            new_rhs = cancel(rhs * lcd)
+            steps.append(_step(get_step("frac_clear_multiply", lang,
+                                         lcd=lcd,
+                                         result=f"{sympy_to_text(new_lhs)} = {sympy_to_text(new_rhs)}")))
+
+            # Show simplified equation
+            new_lhs_expanded = expand(new_lhs)
+            new_rhs_expanded = expand(new_rhs)
+            steps.append(_step(get_step("frac_clear_simplified", lang,
+                                         result=f"{sympy_to_text(new_lhs_expanded)} = {sympy_to_text(new_rhs_expanded)}")))
+
+            # Now solve the cleared equation (non-verbose for inner solve)
+            inner = solve_linear_equation(new_lhs_expanded, new_rhs_expanded, lang, verbose=False)
+            # Append inner steps (skip the eq_start step since we already showed it)
+            for step in inner.steps[1:]:
+                steps.append(step)
+
+            return Solution(problem, get_method_name("linear_equation_easy", lang),
+                            "linear_equation_easy", steps, inner.answer)
+
+    # No fractions — fall back to standard solve
+    return solve_linear_equation(lhs, rhs, lang, verbose=False)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -696,7 +825,7 @@ def solve_system(eq1_lhs, eq1_rhs, eq2_lhs, eq2_rhs, lang: str = "pl") -> Soluti
 #  AUTO-DETECT SOLVER (main entry point)
 # ═══════════════════════════════════════════════════════════════════════════
 
-def _solve_single_equation(equation_tuple, lang: str = "pl") -> List[Solution]:
+def _solve_single_equation(equation_tuple, lang: str = "pl", verbose: bool = False, easy_mode: bool = False) -> List[Solution]:
     """Solve a single equation (lhs, op, rhs) and return a list of solutions."""
     lhs, op, rhs = equation_tuple
     solutions = []
@@ -717,7 +846,10 @@ def _solve_single_equation(equation_tuple, lang: str = "pl") -> List[Solution]:
         sol = solve_quadratic(lhs, rhs, lang)
         solutions.append(sol)
     elif deg == 1:
-        sol = solve_linear_equation(lhs, rhs, lang)
+        if easy_mode:
+            sol = solve_linear_equation_easy(lhs, rhs, lang)
+        else:
+            sol = solve_linear_equation(lhs, rhs, lang, verbose=verbose)
         solutions.append(sol)
     elif deg == 0:
         if diff == 0:
@@ -751,6 +883,8 @@ def solve_problem(
     equations: list,
     context: dict,
     lang: str = "pl",
+    verbose: bool = False,
+    easy_mode: bool = False,
 ) -> List[Solution]:
     """
     Given parsed exercise data, determine the problem type and solve it.
@@ -769,7 +903,7 @@ def solve_problem(
     # ── Multiple independent equations — solve each one ────────────────
     if len(equations) > 2:
         for eq in equations:
-            sols = _solve_single_equation(eq, lang)
+            sols = _solve_single_equation(eq, lang, verbose=verbose, easy_mode=easy_mode)
             solutions.extend(sols)
         return solutions
 
@@ -784,7 +918,7 @@ def solve_problem(
 
     # ── Single equation ────────────────────────────────────────────────
     if len(equations) == 1:
-        sols = _solve_single_equation(equations[0], lang)
+        sols = _solve_single_equation(equations[0], lang, verbose=verbose, easy_mode=easy_mode)
         solutions.extend(sols)
         return solutions
 

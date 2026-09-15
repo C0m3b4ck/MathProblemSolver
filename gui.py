@@ -71,6 +71,9 @@ _STRINGS = {
         "pdf_success_msg": "Plik PDF zapisany:\n{text}",
         # Image error
         "image_error": "Błąd: {text}",
+        # Checkbox labels
+        "chk_verbose": "Szczegółowe kroki",
+        "chk_easy": "Łatwiejsze rozwiązanie",
     },
     "en": {
         # Window
@@ -117,6 +120,9 @@ _STRINGS = {
         "pdf_success_msg": "PDF saved to:\n{text}",
         # Image error
         "image_error": "Error: {text}",
+        # Checkbox labels
+        "chk_verbose": "Verbose steps",
+        "chk_easy": "Easier solutions",
     },
 }
 
@@ -141,6 +147,8 @@ class MathSolverGUI:
         self._last_diagnostics = []
         self.lang = tk.StringVar(value=DEFAULT_LANGUAGE)
         self.full_image = tk.BooleanVar(value=False)
+        self.solver_verbose = tk.BooleanVar(value=False)
+        self.easy_mode = tk.BooleanVar(value=False)
         self.status_var = tk.StringVar()
 
         # Trace language changes to update all labels
@@ -204,6 +212,11 @@ class MathSolverGUI:
         # Panel titles
         self.preview_title_label.config(text=_t("preview_title", lang))
         self.results_title_label.config(text=_t("results_title", lang))
+
+        # Checkbox labels
+        self.full_img_cb.config(text="Full image scanning")
+        self.verbose_cb.config(text=_t("chk_verbose", lang))
+        self.easy_cb.config(text=_t("chk_easy", lang))
 
         # Preview placeholder (only if no image loaded)
         if not self.image_path:
@@ -304,6 +317,22 @@ class MathSolverGUI:
         )
         self.full_img_cb.pack(side=tk.LEFT, padx=10)
 
+        self.verbose_cb = tk.Checkbutton(
+            self.full_img_frame,
+            text=_t("chk_verbose", self.lang.get()),
+            variable=self.solver_verbose,
+            bg=GUI_BG_COLOR, font=("Segoe UI", 9),
+        )
+        self.verbose_cb.pack(side=tk.LEFT, padx=10)
+
+        self.easy_cb = tk.Checkbutton(
+            self.full_img_frame,
+            text=_t("chk_easy", self.lang.get()),
+            variable=self.easy_mode,
+            bg=GUI_BG_COLOR, font=("Segoe UI", 9),
+        )
+        self.easy_cb.pack(side=tk.LEFT, padx=10)
+
         # ── Status bar ─────────────────────────────────────────────────
         status_bar = tk.Frame(self.root, bg="#d0d0d0", pady=2)
         status_bar.pack(fill=tk.X, side=tk.BOTTOM)
@@ -373,6 +402,8 @@ class MathSolverGUI:
                 generate_pdf=False,
                 verbose=False,
                 full_image=self.full_image.get(),
+                solver_verbose=self.solver_verbose.get(),
+                easy_mode=self.easy_mode.get(),
             )
             self.root.after(0, self._display_result, result)
         except Exception as e:

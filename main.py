@@ -106,6 +106,8 @@ def run_pipeline(
     pdf_output: str = None,
     verbose: bool = True,
     full_image: bool = False,
+    solver_verbose: bool = False,
+    easy_mode: bool = False,
 ) -> PipelineResult:
     """
     Run the full solve pipeline on an image.
@@ -204,6 +206,8 @@ def run_pipeline(
             parsed["equations"],
             parsed["context"],
             lang=lang,
+            verbose=solver_verbose,
+            easy_mode=easy_mode,
         )
 
         diag.solutions = solutions
@@ -262,6 +266,10 @@ def parse_args():
                         help="Launch the GUI")
     parser.add_argument("--quiet", "-q", action="store_true",
                         help="Suppress verbose output")
+    parser.add_argument("--verbose", "-v", action="store_true",
+                        help="Show verbose step-by-step details for linear equations")
+    parser.add_argument("--easy", "-e", action="store_true",
+                        help="Use easier solutions (clear fractions via LCD before solving)")
     return parser.parse_args()
 
 
@@ -300,6 +308,8 @@ def main():
         pdf_output=args.output,
         verbose=not args.quiet,
         full_image=args.full_image,
+        solver_verbose=args.verbose,
+        easy_mode=args.easy,
     )
 
     if not result.solutions or all(not s.is_valid for s in result.solutions):

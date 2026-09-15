@@ -16,6 +16,7 @@ METHOD_NAMES = {
         "fraction_div": "Dzielenie ułamków",
         "percentage": "Obliczanie procentów",
         "linear_equation": "Równanie liniowe",
+        "linear_equation_easy": "Równanie liniowe (łatwiejsza metoda)",
         "quadratic_equation": "Równanie kwadratowe",
         "quadratic_factoring": "Rozkład na czynniki",
         "quadratic_formula": "Wzór kwadratowy",
@@ -42,6 +43,7 @@ METHOD_NAMES = {
         "fraction_div": "Dividing fractions",
         "percentage": "Percentage calculation",
         "linear_equation": "Linear equation",
+        "linear_equation_easy": "Linear equation (easier method)",
         "quadratic_equation": "Quadratic equation",
         "quadratic_factoring": "Factoring",
         "quadratic_formula": "Quadratic formula",
@@ -346,6 +348,36 @@ STEPS = {
     "stat_range": {
         "pl": "Rozstęp: {max_val} - {min_val} = {result}",
         "en": "Range: {max_val} - {min_val} = {result}",
+    },
+    # ── Fraction clearing (easy mode) ───────────────────────────────────
+    "frac_clear_detect": {
+        "pl": "Wykryto ułamki w równaniu",
+        "en": "Fractions detected in equation",
+    },
+    "frac_clear_lcd": {
+        "pl": "Najmniejsza wspólna wielokrotność mianowników: {lcd}",
+        "en": "LCD of denominators: {lcd}",
+    },
+    "frac_clear_multiply": {
+        "pl": "Mnożymy obie strony przez {lcd}: {result}",
+        "en": "Multiplying both sides by {lcd}: {result}",
+    },
+    "frac_clear_simplified": {
+        "pl": "Po uproszczeniu: {result}",
+        "en": "After simplifying: {result}",
+    },
+    # ── Verbose mode steps ──────────────────────────────────────────────
+    "verbose_move": {
+        "pl": "Przenosimy {term} {direction}: {result}",
+        "en": "Moving {term} {direction}: {result}",
+    },
+    "verbose_combine": {
+        "pl": "Łączymy wyrażenia: {result}",
+        "en": "Combining terms: {result}",
+    },
+    "verbose_divide_both": {
+        "pl": "Dzielimy obie strony przez {divisor}: lewa = {left}, prawa = {right}",
+        "en": "Dividing both sides by {divisor}: left = {left}, right = {right}",
     },
 }
 
