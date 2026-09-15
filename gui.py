@@ -456,7 +456,12 @@ class MathSolverGUI:
         """Update CPU and RAM usage labels every 2 seconds."""
         try:
             import psutil
-            cpu_pct = psutil.cpu_percent(interval=0)
+            if not hasattr(self, '_psutil_initialized'):
+                # First call with interval to get a real CPU reading
+                self._psutil_initialized = True
+                cpu_pct = psutil.cpu_percent(interval=0.2)
+            else:
+                cpu_pct = psutil.cpu_percent(interval=0)
             mem = psutil.virtual_memory()
             ram_pct = mem.percent
             ram_mb = int(mem.used / (1024 * 1024))

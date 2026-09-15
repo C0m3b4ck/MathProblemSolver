@@ -381,12 +381,29 @@ def _split_latex_expressions(latex_str: str) -> List[str]:
     result = re.sub(r"\\begin\{[^{}]*\}", "", result)
     result = re.sub(r"\\end\{[^{}]*\}", "", result)
 
-    # Split on LaTeX line breaks and column separators
-    parts = re.split(r"\\\\+|&", result)
+    # Handle array row/column structure: split on \\ first, then extract
+    # the math content from each row (skip label columns and empty cells).
+    rows = re.split(r"\\\\+", result)
+    row_parts = []
+    for row in rows:
+        cells = re.split(r"&", row)
+        for cell in cells:
+            cell = cell.strip()
+            if not cell or len(cell) < 2:
+                continue
+            # Skip pure label cells (single letter or \mathrm{letter})
+            stripped = re.sub(r"\\mathrm\{([^{}]*)\}", r"\1", cell)
+            stripped = re.sub(r"[{}~]", "", stripped).strip()
+            if re.match(r"^[a-zA-Z]$", stripped):
+                continue
+            # Skip empty brace cells like {{}} or {{ }}
+            if re.match(r"^[{}~\s]*$", stripped):
+                continue
+            row_parts.append(cell)
 
     # Further split each part on \quad, \qquad, etc.
     expanded = []
-    for segment in parts:
+    for segment in row_parts:
         segment = segment.strip()
         if not segment:
             continue
@@ -403,10 +420,9 @@ def _split_latex_expressions(latex_str: str) -> List[str]:
         # Strip \mathrm{...} with proper brace matching (preserves nested \frac)
         expr = _strip_cmd_wrappers(expr, "mathrm")
 
-        # NOTE: We do NOT strip outer {{...}} braces here.
-        # Let _latex_to_text handle all brace cleanup — it converts \frac{}{}
-        # first (removing those braces), then strips all remaining stray braces.
-        # Stripping braces here risks removing the closing } of \frac{4}{7} etc.
+        # Strip double braces {{...}} but NOT single braces needed by \frac{}{}.
+        # Use a proper brace-matching approach to avoid breaking nested structures.
+        expr = _strip_double_braces(expr)
 
         # Strip exercise labels: "a) ", "b~", "i~", etc. (start only)
         expr = re.sub(r"^[a-zA-Z]\s*[)\.~]\s*", "", expr)
@@ -432,6 +448,61 @@ def _split_latex_expressions(latex_str: str) -> List[str]:
             cleaned.append(expr)
 
     return cleaned if cleaned else [latex_str]
+
+
+def _strip_double_braces(expr: str) -> str:
+    """
+    Strip double braces {{...}} from a LaTeX expression, but preserve
+    single braces needed by commands like \\frac{}{}, \\sqrt{}, etc.
+    Uses brace-depth tracking to avoid breaking nested structures.
+    """
+    if "{{" not in expr:
+        return expr
+
+    result = []
+    i = 0
+    n = len(expr)
+    while i < n:
+        # Detect {{ at current depth 0
+        if expr[i] == "{" and i + 1 < n and expr[i + 1] == "{":
+            # Find matching }}
+            depth = 0
+            j = i
+            while j < n:
+                if expr[j] == "{":
+                    depth += 1
+                elif expr[j] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        # Check if followed by }}
+                        if j + 1 < n and expr[j + 1] == "}" and j + 2 < n and expr[j + 2] == "}":
+                            # }} after inner content — skip outer {{ and }}
+                            # Keep only the inner content
+                            inner = expr[i + 2: j]
+                            result.append(inner)
+                            i = j + 3
+                            break
+                        elif j + 1 < n and expr[j + 1] == "}":
+                            # }} — double closing brace
+                            inner = expr[i + 2: j]
+                            result.append(inner)
+                            i = j + 2
+                            break
+                        else:
+                            # Just }} without double opening — treat as single {
+                            result.append(expr[i])
+                            i += 1
+                            break
+                j += 1
+            else:
+                # Unmatched — just output character
+                result.append(expr[i])
+                i += 1
+        else:
+            result.append(expr[i])
+            i += 1
+
+    return "".join(result)
 
 
 def _strip_cmd_wrappers(expr: str, cmd: str) -> str:
@@ -549,6 +620,18 @@ def parse_exercise(raw_text: str, math_ocr_text: Optional[str] = None) -> dict:
             seen_eqs.add(key)
             unique_equations.append(eq)
     equations = unique_equations
+
+    # Flag equations with garbled OCR characters (§, ©, ¶, etc.)
+    # These are Tesseract artifacts when it can't read fractions properly
+    GARLED_CHARS = set("§©¶†‡※")
+    clean_equations = []
+    for eq in equations:
+        lhs_str, op, rhs_str = str(eq[0]), eq[1], str(eq[2])
+        if any(c in lhs_str or c in rhs_str for c in GARLED_CHARS):
+            unparsed.append(f"{lhs_str} {op} {rhs_str} (OCR garbled)")
+        else:
+            clean_equations.append(eq)
+    equations = clean_equations
 
     return {
         "raw": raw_text,
