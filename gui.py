@@ -80,7 +80,7 @@ _STRINGS = {
         "handwriting_prompt": "Napisz poniżej kilka słów:",
         "handwriting_accept": "Akceptuj",
         "handwriting_clear": "Wyczyść",
-        "chk_use_handwriting": "Użyj mojego pisma",
+        "chk_use_handwriting": "Użyj mojego pisma do zapisu",
         "handwriting_saved": "Próbka pisma zapisana!",
         "handwriting_not_saved": "Brak próbki pisma",
     },
@@ -138,7 +138,7 @@ _STRINGS = {
         "handwriting_prompt": "Write a few words below:",
         "handwriting_accept": "Accept",
         "handwriting_clear": "Clear",
-        "chk_use_handwriting": "Use my handwriting",
+        "chk_use_handwriting": "Use my handwriting for output",
         "handwriting_saved": "Handwriting sample saved!",
         "handwriting_not_saved": "No handwriting sample found",
     },
@@ -475,9 +475,33 @@ class MathSolverGUI:
             bg=GUI_BG_COLOR, font=("Segoe UI", 10),
         )
         self.lang_label.pack(side=tk.LEFT)
-        tk.Radiobutton(lang_frame, text="🇵🇱 PL", variable=self.lang, value="pl",
+
+        # Draw tiny PL flag (white/red bicolor)
+        pl_flag = tk.Canvas(lang_frame, width=16, height=11, bg="white",
+                            highlightthickness=1, highlightbackground="#999")
+        pl_flag.pack(side=tk.LEFT, padx=(6, 1))
+        pl_flag.create_rectangle(0, 0, 16, 6, fill="white", outline="white")
+        pl_flag.create_rectangle(0, 6, 16, 11, fill="#DC143C", outline="#DC143C")
+        tk.Radiobutton(lang_frame, text=" PL", variable=self.lang, value="pl",
                        bg=GUI_BG_COLOR, font=("Segoe UI", 10)).pack(side=tk.LEFT)
-        tk.Radiobutton(lang_frame, text="🇬🇧 EN", variable=self.lang, value="en",
+
+        # Draw tiny UK flag (blue with red/white cross)
+        uk_flag = tk.Canvas(lang_frame, width=16, height=11, highlightthickness=1, highlightbackground="#999")
+        uk_flag.pack(side=tk.LEFT, padx=(6, 1))
+        uk_flag.create_rectangle(0, 0, 16, 11, fill="#012169", outline="#012169")
+        # White diagonals
+        uk_flag.create_line(0, 0, 16, 11, fill="white", width=3)
+        uk_flag.create_line(0, 11, 16, 0, fill="white", width=3)
+        # Red diagonals
+        uk_flag.create_line(0, 0, 16, 11, fill="#C8102E", width=1)
+        uk_flag.create_line(0, 11, 16, 0, fill="#C8102E", width=1)
+        # White cross
+        uk_flag.create_rectangle(0, 4, 16, 7, fill="white", outline="white")
+        uk_flag.create_rectangle(6, 0, 10, 11, fill="white", outline="white")
+        # Red cross
+        uk_flag.create_rectangle(0, 5, 16, 6, fill="#C8102E", outline="#C8102E")
+        uk_flag.create_rectangle(7, 0, 9, 11, fill="#C8102E", outline="#C8102E")
+        tk.Radiobutton(lang_frame, text=" EN", variable=self.lang, value="en",
                        bg=GUI_BG_COLOR, font=("Segoe UI", 10)).pack(side=tk.LEFT)
 
         # ── Main content area ──────────────────────────────────────────

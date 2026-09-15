@@ -157,6 +157,153 @@ def _add_char_variation(
     return char, font
 
 
+# ── Fraction rendering in PDF ─────────────────────────────────────────────
+
+import re as _re
+
+# Pattern: match fractions like 12/5, x/3, 2*x/7, -3/4, etc.
+# Numerator/denominator: digits, x, *, +, -, (, ) — no spaces
+_FRACTION_RE = _re.compile(
+    r'(?<![a-zA-Z/\d])'         # not preceded by letter, slash, or digit
+    r'(-?)'                      # optional negative sign
+    r'([\d\w\+\-\*\(\)]+?)'     # numerator: digits, x, operators, parens
+    r'/'
+    r'([\d\w\+\-\*\(\)]+?)'     # denominator: same
+    r'(?![a-zA-Z/\d])'          # not followed by letter, slash, or digit
+)
+
+
+def _measure_text_width(c, text, font_name, font_size):
+    """Measure text width on a reportlab canvas."""
+    c.setFont(font_name, font_size)
+    return c.stringWidth(text, font_name, font_size)
+
+
+def _draw_fraction(c, x, y, numerator, denominator, font_name, font_size,
+                   color=None):
+    """
+    Draw a vertical fraction on a reportlab canvas:
+        numerator
+       ─────────
+       denominator
+
+    Returns the total width used.
+    """
+    if color:
+        c.setFillColorRGB(*color)
+
+    num_str = str(numerator).strip()
+    den_str = str(denominator).strip()
+
+    num_width = _measure_text_width(c, num_str, font_name, font_size)
+    den_width = _measure_text_width(c, den_str, font_name, font_size)
+    frac_width = max(num_width, den_width) + 4  # small padding
+
+    bar_y = y - font_size * 0.55  # position of the fraction bar
+    small_size = font_size * 0.85  # slightly smaller font for numerator/denominator
+
+    # Draw numerator (centered above bar)
+    c.setFont(font_name, small_size)
+    num_x = x + (frac_width - num_width) / 2
+    c.drawString(num_x, y + 2, num_str)
+
+    # Draw fraction bar
+    c.setLineWidth(1.2)
+    c.line(x, bar_y, x + frac_width, bar_y)
+
+    # Draw denominator (centered below bar)
+    c.setFont(font_name, small_size)
+    den_x = x + (frac_width - den_width) / 2
+    c.drawString(den_x, bar_y - small_size - 1, den_str)
+
+    return frac_width
+
+
+def _draw_text_with_fractions(c, x, y, text, font_name, font_size, color=None):
+    """
+    Draw text on a reportlab canvas, rendering any detected fractions vertically.
+    Non-fraction parts are drawn normally.
+
+    Returns the final x position after all text is drawn.
+    """
+    if color:
+        c.setFillColorRGB(*color)
+
+    cursor_x = x
+
+    # Find all fraction matches and the gaps between them
+    last_end = 0
+    for match in _FRACTION_RE.finditer(text):
+        # Draw text before the fraction
+        before = text[last_end:match.start()]
+        if before:
+            c.setFont(font_name, font_size)
+            c.drawString(cursor_x, y, before)
+            cursor_x += _measure_text_width(c, before, font_name, font_size)
+
+        # Draw the fraction vertically
+        sign = match.group(1)  # optional negative sign
+        num = match.group(2).strip()
+        den = match.group(3).strip()
+
+        if sign:
+            # Draw the negative sign before the fraction
+            c.setFont(font_name, font_size)
+            c.drawString(cursor_x, y, sign)
+            cursor_x += _measure_text_width(c, sign, font_name, font_size)
+
+        w = _draw_fraction(c, cursor_x, y, num, den, font_name, font_size, color)
+        cursor_x += w
+
+        last_end = match.end()
+
+    # Draw remaining text after last fraction
+    remaining = text[last_end:]
+    if remaining:
+        c.setFont(font_name, font_size)
+        c.drawString(cursor_x, y, remaining)
+        cursor_x += _measure_text_width(c, remaining, font_name, font_size)
+
+    return cursor_x
+
+
+def _wrap_text_with_fractions(text, font, max_width, c, font_name, font_size):
+    """
+    Word-wrap text that may contain vertical fractions.
+    Returns list of text segments, where each segment is a string.
+    Fraction segments are wider than their text representation.
+    """
+    words = text.split()
+    if not words:
+        return [text]
+
+    lines = []
+    current_line = words[0]
+
+    for word in words[1:]:
+        test_line = f"{current_line} {word}"
+        # Estimate width — fractions are wider than their text
+        has_frac = bool(_FRACTION_RE.search(test_line))
+        if has_frac:
+            # Rough estimate: count fractions and add extra width per fraction
+            fracs = list(_FRACTION_RE.finditer(test_line))
+            extra = len(fracs) * font_size * 1.5
+            bbox = font.getbbox(test_line)
+            line_width = (bbox[2] - bbox[0]) + extra
+        else:
+            bbox = font.getbbox(test_line)
+            line_width = bbox[2] - bbox[0]
+
+        if line_width <= max_width:
+            current_line = test_line
+        else:
+            lines.append(current_line)
+            current_line = word
+
+    lines.append(current_line)
+    return lines
+
+
 # ── PDF Generation ─────────────────────────────────────────────────────────
 
 def _draw_handwriting_overlay(canvas_obj, page_w, page_h, sample_path=None):
@@ -286,32 +433,59 @@ def render_solutions_pdf(
         y -= heading_size + 5
 
         # Problem statement
-        c.setFont(font_name, body_size)
         c.setFillColorRGB(*[c / 255 for c in TITLE_COLOR])
+        title_color = tuple(c / 255 for c in TITLE_COLOR)
         problem_text = f"Zadanie: {solution.problem}" if lang == "pl" else f"Problem: {solution.problem}"
-        wrapped = _wrap_text(problem_text, measure_font, usable_width)
+        has_frac_prob = bool(_FRACTION_RE.search(problem_text))
+        if has_frac_prob:
+            wrapped = _wrap_text_with_fractions(
+                problem_text, measure_font, usable_width, c, font_name, body_size
+            )
+        else:
+            wrapped = _wrap_text(problem_text, measure_font, usable_width)
         for line in wrapped:
             if y < 50:
                 c.showPage()
                 y = page_h - margin_top
-            c.drawString(margin_left, y, line)
+            if has_frac_prob:
+                _draw_text_with_fractions(
+                    c, margin_left, y, line,
+                    font_name, body_size, color=title_color
+                )
+            else:
+                c.setFont(font_name, body_size)
+                c.drawString(margin_left, y, line)
             y -= body_size + 4
 
         y -= 5
 
         # Steps
         c.setFillColorRGB(*[c / 255 for c in STEP_COLOR])
+        step_color = tuple(c / 255 for c in STEP_COLOR)
         for step in solution.steps:
             if y < 50:
                 c.showPage()
                 y = page_h - margin_top
 
-            c.setFont(font_name, body_size)
             step_text = f"  → {step.text}"
-            wrapped = _wrap_text(step_text, measure_font, usable_width - 20)
+            has_fracs = bool(_FRACTION_RE.search(step_text))
+            if has_fracs:
+                wrapped = _wrap_text_with_fractions(
+                    step_text, measure_font, usable_width - 20, c, font_name, body_size
+                )
+            else:
+                wrapped = _wrap_text(step_text, measure_font, usable_width - 20)
+
             for wline in wrapped:
-                c.drawString(margin_left + 15, y, wline)
-                y -= body_size + 3
+                if has_fracs:
+                    _draw_text_with_fractions(
+                        c, margin_left + 15, y, wline,
+                        font_name, body_size, color=step_color
+                    )
+                else:
+                    c.setFont(font_name, body_size)
+                    c.drawString(margin_left + 15, y, wline)
+                y -= body_size + 6 if has_fracs else body_size + 3
 
         y -= 8
 
@@ -320,10 +494,18 @@ def render_solutions_pdf(
             c.showPage()
             y = page_h - margin_top
 
-        c.setFont(font_name, answer_size)
-        c.setFillColorRGB(*[c / 255 for c in ANSWER_COLOR])
+        answer_color = tuple(c / 255 for c in ANSWER_COLOR)
         answer_label = f"  Odpowiedź: {solution.answer}" if lang == "pl" else f"  Answer: {solution.answer}"
-        c.drawString(margin_left, y, answer_label)
+        has_frac_answer = bool(_FRACTION_RE.search(answer_label))
+        if has_frac_answer:
+            _draw_text_with_fractions(
+                c, margin_left, y, answer_label,
+                font_name, answer_size, color=answer_color
+            )
+        else:
+            c.setFont(font_name, answer_size)
+            c.setFillColorRGB(*answer_color)
+            c.drawString(margin_left, y, answer_label)
         y -= answer_size + 15
 
         # Separator line between solutions
