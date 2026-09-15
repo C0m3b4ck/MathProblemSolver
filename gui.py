@@ -637,30 +637,27 @@ class MathSolverGUI:
         )
         self.frac_bars_cb.pack(side=tk.LEFT, padx=10)
 
-        # ── CPU / RAM counter (above checkboxes) ────────────────────────
-        self.sys_frame = tk.Frame(self.root, bg="#e8e8e8", pady=1)
-        self.sys_frame.pack(fill=tk.X, side=tk.BOTTOM)
+        # ── Status bar with CPU / RAM ────────────────────────────────────
+        status_bar = tk.Frame(self.root, bg="#d0d0d0", pady=2)
+        status_bar.pack(fill=tk.X, side=tk.BOTTOM)
 
         self.cpu_label = tk.Label(
-            self.sys_frame, text="CPU: ---%",
-            bg="#e8e8e8", font=("Consolas", 9), anchor=tk.W, fg="#555",
+            status_bar, text="CPU: ---%",
+            bg="#d0d0d0", font=("Consolas", 9), anchor=tk.W, fg="#555",
         )
-        self.cpu_label.pack(side=tk.LEFT, padx=10)
+        self.cpu_label.pack(side=tk.RIGHT, padx=10)
 
         self.ram_label = tk.Label(
-            self.sys_frame, text="RAM: ---% (-- MB)",
-            bg="#e8e8e8", font=("Consolas", 9), anchor=tk.W, fg="#555",
+            status_bar, text="RAM: ---% (-- MB)",
+            bg="#d0d0d0", font=("Consolas", 9), anchor=tk.W, fg="#555",
         )
-        self.ram_label.pack(side=tk.LEFT, padx=10)
+        self.ram_label.pack(side=tk.RIGHT, padx=10)
+
+        tk.Label(status_bar, textvariable=self.status_var, bg="#d0d0d0",
+                 font=("Segoe UI", 9), anchor=tk.W).pack(fill=tk.X, side=tk.LEFT, padx=10)
 
         # Start periodic system stats update
         self._update_system_stats()
-
-        # ── Status bar ─────────────────────────────────────────────────
-        status_bar = tk.Frame(self.root, bg="#d0d0d0", pady=2)
-        status_bar.pack(fill=tk.X, side=tk.BOTTOM)
-        tk.Label(status_bar, textvariable=self.status_var, bg="#d0d0d0",
-                 font=("Segoe UI", 9), anchor=tk.W).pack(fill=tk.X, padx=10)
 
     # ── Actions ────────────────────────────────────────────────────────
 
