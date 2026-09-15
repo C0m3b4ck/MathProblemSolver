@@ -15,7 +15,7 @@ EXAMPLES_DIR = os.path.join(BASE_DIR, "examples")
 
 # ── Language ───────────────────────────────────────────────────────────────
 # "pl" for Polish, "en" for English
-DEFAULT_LANGUAGE = "pl"
+DEFAULT_LANGUAGE = "en"
 
 # ── OCR Settings ───────────────────────────────────────────────────────────
 # Tesseract

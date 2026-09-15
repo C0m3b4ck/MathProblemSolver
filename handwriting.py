@@ -12,11 +12,15 @@ from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas as pdf_canvas
 
 from config import (
-    FONTS_DIR, TEMPLATES_DIR, OUTPUT_DIR,
+    FONTS_DIR, TEMPLATES_DIR, OUTPUT_DIR, ASSETS_DIR,
     LINE_SPACING, PAGE_MARGIN_TOP, PAGE_MARGIN_LEFT, PAGE_MARGIN_RIGHT,
     HANDWRITING_FONT_SIZE, ANSWER_COLOR, STEP_COLOR, TITLE_COLOR,
 )
 from solver import Solution, Step
+
+
+# Path to user handwriting sample (created by GUI drawing dialog)
+USER_HANDWRITING_SAMPLE_PATH = os.path.join(ASSETS_DIR, "fonts", "user_handwriting_sample.png")
 
 
 # ── Font loading ───────────────────────────────────────────────────────────
@@ -128,11 +132,8 @@ def _wrap_text(text: str, font: ImageFont.FreeTypeFont, max_width: int) -> List[
 
     for word in words[1:]:
         test_line = f"{current_line} {word}"
-        try:
-            bbox = font.getbbox(test_line)
-            line_width = bbox[2] - bbox[0]
-        except AttributeError:
-            line_width = font.getsize(test_line)[0]
+        bbox = font.getbbox(test_line)
+        line_width = bbox[2] - bbox[0]
 
         if line_width <= max_width:
             current_line = test_line
@@ -157,6 +158,27 @@ def _add_char_variation(
 
 
 # ── PDF Generation ─────────────────────────────────────────────────────────
+
+def _draw_handwriting_overlay(canvas_obj, page_w, page_h, sample_path=None):
+    """
+    Draw the user's handwriting sample as a small header in the top-right corner of the page.
+    """
+    if sample_path is None:
+        sample_path = USER_HANDWRITING_SAMPLE_PATH
+    if not os.path.isfile(sample_path):
+        return
+    try:
+        from reportlab.lib.utils import ImageReader
+        img = ImageReader(sample_path)
+        # Small header image in top-right corner
+        overlay_w = 120
+        overlay_h = 35
+        x_pos = page_w - overlay_w - 40
+        y_pos = page_h - 30
+        canvas_obj.drawImage(img, x_pos, y_pos, width=overlay_w, height=overlay_h,
+                             mask='auto', preserveAspectRatio=True)
+    except Exception:
+        pass  # Silently skip if overlay fails
 
 def render_solutions_pdf(
     solutions: List[Solution],
@@ -207,6 +229,9 @@ def render_solutions_pdf(
     body_size = HANDWRITING_FONT_SIZE
     answer_size = HANDWRITING_FONT_SIZE + 2
 
+    # Create a PIL font for text measurement (used by _wrap_text)
+    measure_font = _get_font(body_size)
+
     margin_left = PAGE_MARGIN_LEFT
     margin_right = PAGE_MARGIN_RIGHT
     margin_top = PAGE_MARGIN_TOP
@@ -234,6 +259,9 @@ def render_solutions_pdf(
     c.setLineWidth(1.5)
     c.line(margin_left - 15, page_h - margin_top + 10, margin_left - 15, 40)
 
+    # Draw user handwriting overlay on first page (if sample exists)
+    _draw_handwriting_overlay(c, page_w, page_h)
+
     # ── Render each solution ───────────────────────────────────────────
     for sol_idx, solution in enumerate(solutions):
         # Check for page break
@@ -247,6 +275,8 @@ def render_solutions_pdf(
             while ly > 40:
                 c.line(margin_left - 10, ly, page_w - margin_right + 10, ly)
                 ly -= LINE_SPACING
+            # Draw user handwriting overlay on new page
+            _draw_handwriting_overlay(c, page_w, page_h)
 
         # Method heading
         c.setFont(font_name, heading_size)
@@ -259,7 +289,7 @@ def render_solutions_pdf(
         c.setFont(font_name, body_size)
         c.setFillColorRGB(*[c / 255 for c in TITLE_COLOR])
         problem_text = f"Zadanie: {solution.problem}" if lang == "pl" else f"Problem: {solution.problem}"
-        wrapped = _wrap_text(problem_text, c._fontname and c or ImageFont.load_default(), usable_width)
+        wrapped = _wrap_text(problem_text, measure_font, usable_width)
         for line in wrapped:
             if y < 50:
                 c.showPage()
@@ -278,7 +308,7 @@ def render_solutions_pdf(
 
             c.setFont(font_name, body_size)
             step_text = f"  → {step.text}"
-            wrapped = _wrap_text(step_text, c._fontname and c or ImageFont.load_default(), usable_width - 20)
+            wrapped = _wrap_text(step_text, measure_font, usable_width - 20)
             for wline in wrapped:
                 c.drawString(margin_left + 15, y, wline)
                 y -= body_size + 3

@@ -74,6 +74,15 @@ _STRINGS = {
         # Checkbox labels
         "chk_verbose": "Szczegółowe kroki",
         "chk_easy": "Łatwiejsze rozwiązanie",
+        # Handwriting
+        "handwriting_btn": "✏️ Próbka pisma",
+        "handwriting_title": "Próbkuj swoje pismo",
+        "handwriting_prompt": "Napisz poniżej kilka słów:",
+        "handwriting_accept": "Akceptuj",
+        "handwriting_clear": "Wyczyść",
+        "chk_use_handwriting": "Użyj mojego pisma",
+        "handwriting_saved": "Próbka pisma zapisana!",
+        "handwriting_not_saved": "Brak próbki pisma",
     },
     "en": {
         # Window
@@ -123,6 +132,15 @@ _STRINGS = {
         # Checkbox labels
         "chk_verbose": "Verbose steps",
         "chk_easy": "Easier solutions",
+        # Handwriting
+        "handwriting_btn": "✏️ Sample handwriting",
+        "handwriting_title": "Sample your handwriting",
+        "handwriting_prompt": "Write a few words below:",
+        "handwriting_accept": "Accept",
+        "handwriting_clear": "Clear",
+        "chk_use_handwriting": "Use my handwriting",
+        "handwriting_saved": "Handwriting sample saved!",
+        "handwriting_not_saved": "No handwriting sample found",
     },
 }
 
@@ -137,6 +155,197 @@ def _t(key: str, lang: str, **kwargs) -> str:
         return template
 
 
+# ── Handwriting Dialog ─────────────────────────────────────────────────────
+
+class _HandwritingDialog(tk.Toplevel):
+    """
+    A dialog for capturing user handwriting via a drawing canvas.
+    The drawn content is saved as a PNG that can be overlaid on PDF output.
+    """
+
+    def __init__(self, parent, lang="pl"):
+        super().__init__(parent)
+        self.lang = lang
+        self.title(_t("handwriting_title", lang))
+        self.resizable(False, False)
+        self.result_path = None  # set on accept
+
+        self.configure(bg="#f0f0f0")
+        self.transient(parent)
+        self.grab_set()
+
+        # ── Prompt label ──────────────────────────────────────────────
+        tk.Label(
+            self, text=_t("handwriting_prompt", lang),
+            bg="#f0f0f0", font=("Segoe UI", 11, "bold"),
+        ).pack(pady=(10, 5))
+
+        # ── Text entry (user types same words) ────────────────────────
+        entry_frame = tk.Frame(self, bg="#f0f0f0")
+        entry_frame.pack(fill=tk.X, padx=15)
+        self.text_entry = tk.Entry(entry_frame, font=("Segoe UI", 11), width=50)
+        self.text_entry.pack(fill=tk.X)
+        self.text_entry.insert(0, "")
+        self.text_entry.config(fg="#888")
+        self.text_entry.bind("<FocusIn>", self._clear_placeholder)
+        self.text_entry.bind("<FocusOut>", self._restore_placeholder)
+        self._placeholder = ""
+
+        # ── Drawing canvas ────────────────────────────────────────────
+        canvas_frame = tk.Frame(self, bg="white", relief=tk.SUNKEN, bd=2)
+        canvas_frame.pack(padx=15, pady=10)
+
+        self.canvas_w = 600
+        self.canvas_h = 200
+        self.draw_canvas = tk.Canvas(
+            canvas_frame, width=self.canvas_w, height=self.canvas_h,
+            bg="white", cursor="pencil",
+        )
+        self.draw_canvas.pack()
+
+        # Internal drawing state
+        self._last_x = None
+        self._last_y = None
+        self._pen_width = 3
+        self._drawing = False
+
+        self.draw_canvas.bind("<ButtonPress-1>", self._on_press)
+        self.draw_canvas.bind("<B1-Motion>", self._on_drag)
+        self.draw_canvas.bind("<ButtonRelease-1>", self._on_release)
+
+        # ── Pen width slider ──────────────────────────────────────────
+        slider_frame = tk.Frame(self, bg="#f0f0f0")
+        slider_frame.pack(fill=tk.X, padx=15, pady=2)
+        tk.Label(slider_frame, text="Pen width:", bg="#f0f0f0",
+                 font=("Segoe UI", 9)).pack(side=tk.LEFT)
+        self.pen_slider = tk.Scale(
+            slider_frame, from_=1, to=8, orient=tk.HORIZONTAL,
+            variable=tk.IntVar(value=3), bg="#f0f0f0",
+            command=self._on_pen_change, length=200,
+        )
+        self.pen_slider.set(3)
+        self.pen_slider.pack(side=tk.LEFT, padx=5)
+
+        # ── Buttons ───────────────────────────────────────────────────
+        btn_frame = tk.Frame(self, bg="#f0f0f0")
+        btn_frame.pack(pady=10)
+
+        self.clear_btn = tk.Button(
+            btn_frame, text=_t("handwriting_clear", lang),
+            command=self._clear_canvas, font=("Segoe UI", 10),
+            width=12,
+        )
+        self.clear_btn.pack(side=tk.LEFT, padx=10)
+
+        self.accept_btn = tk.Button(
+            btn_frame, text=_t("handwriting_accept", lang),
+            command=self._accept, font=("Segoe UI", 10, "bold"),
+            width=12, bg="#4CAF50", fg="white",
+        )
+        self.accept_btn.pack(side=tk.LEFT, padx=10)
+
+        # Center on parent
+        self.update_idletasks()
+        pw = parent.winfo_width()
+        ph = parent.winfo_height()
+        px = parent.winfo_rootx()
+        py = parent.winfo_rooty()
+        w = self.winfo_width()
+        h = self.winfo_height()
+        self.geometry(f"+{px + pw // 2 - w // 2}+{py + ph // 2 - h // 2}")
+
+    def _clear_placeholder(self, _event):
+        if self.text_entry.get() == self._placeholder:
+            self.text_entry.delete(0, tk.END)
+            self.text_entry.config(fg="black")
+
+    def _restore_placeholder(self, _event):
+        if not self.text_entry.get().strip():
+            self.text_entry.insert(0, self._placeholder)
+            self.text_entry.config(fg="#888")
+
+    def _on_pen_change(self, value):
+        self._pen_width = int(value)
+
+    def _on_press(self, event):
+        self._drawing = True
+        self._last_x = event.x
+        self._last_y = event.y
+
+    def _on_drag(self, event):
+        if self._drawing and self._last_x is not None:
+            self.draw_canvas.create_line(
+                self._last_x, self._last_y, event.x, event.y,
+                fill="black", width=self._pen_width,
+                capstyle=tk.ROUND, smooth=True,
+            )
+            self._last_x = event.x
+            self._last_y = event.y
+
+    def _on_release(self, _event):
+        self._drawing = False
+        self._last_x = None
+        self._last_y = None
+
+    def _clear_canvas(self):
+        self.draw_canvas.delete("all")
+
+    def _accept(self):
+        """Save the canvas content as a PNG image."""
+        try:
+            from PIL import ImageGrab, Image
+            import tkinter as _tk
+        except ImportError:
+            messagebox.showerror("Error", "PIL/Pillow is required for handwriting capture.")
+            return
+
+        # Get canvas position on screen
+        x = self.draw_canvas.winfo_rootx()
+        y = self.draw_canvas.winfo_rooty()
+        w = self.draw_canvas.winfo_width()
+        h = self.draw_canvas.winfo_height()
+
+        # Grab the canvas area
+        img = ImageGrab.grab(bbox=(x, y, x + w, y + h))
+
+        # Crop to bounding box of drawn content (non-white pixels)
+        # Convert to RGB and find non-white region
+        img_rgb = img.convert("RGB")
+        pixels = img_rgb.load()
+        min_x, min_y = w, h
+        max_x, max_y = 0, 0
+        found = False
+        for py_ in range(h):
+            for px_ in range(w):
+                r, g, b = pixels[px_, py_]
+                if r < 240 or g < 240 or b < 240:  # non-white
+                    found = True
+                    min_x = min(min_x, px_)
+                    min_y = min(min_y, py_)
+                    max_x = max(max_x, px_)
+                    max_y = max(max_y, py_)
+
+        if found:
+            # Add small padding
+            pad = 5
+            min_x = max(0, min_x - pad)
+            min_y = max(0, min_y - pad)
+            max_x = min(w, max_x + pad)
+            max_y = min(h, max_y + pad)
+            img = img.crop((min_x, min_y, max_x, max_y))
+
+        # Ensure directory exists
+        fonts_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "fonts")
+        os.makedirs(fonts_dir, exist_ok=True)
+
+        save_path = os.path.join(fonts_dir, "user_handwriting_sample.png")
+        img.save(save_path)
+        self.result_path = save_path
+
+        print(f"[Handwriting] Saved sample to: {save_path}")
+        self.destroy()
+
+
 # ── Main GUI Class ─────────────────────────────────────────────────────────
 
 class MathSolverGUI:
@@ -149,6 +358,7 @@ class MathSolverGUI:
         self.full_image = tk.BooleanVar(value=False)
         self.solver_verbose = tk.BooleanVar(value=False)
         self.easy_mode = tk.BooleanVar(value=False)
+        self.use_handwriting = tk.BooleanVar(value=False)
         self.status_var = tk.StringVar()
 
         # Trace language changes to update all labels
@@ -205,6 +415,7 @@ class MathSolverGUI:
         self.open_btn.config(text=_t("open_btn", lang))
         self.solve_btn.config(text=_t("solve_btn", lang))
         self.pdf_btn.config(text=_t("pdf_btn", lang))
+        self.handwriting_btn.config(text=_t("handwriting_btn", lang))
 
         # Language label
         self.lang_label.config(text=_t("lang_label", lang))
@@ -217,6 +428,7 @@ class MathSolverGUI:
         self.full_img_cb.config(text="Full image scanning")
         self.verbose_cb.config(text=_t("chk_verbose", lang))
         self.easy_cb.config(text=_t("chk_easy", lang))
+        self.handwriting_cb.config(text=_t("chk_use_handwriting", lang))
 
         # Preview placeholder (only if no image loaded)
         if not self.image_path:
@@ -248,6 +460,12 @@ class MathSolverGUI:
         )
         self.pdf_btn.pack(side=tk.LEFT, padx=5)
 
+        self.handwriting_btn = tk.Button(
+            toolbar, text=_t("handwriting_btn", self.lang.get()), command=self._sample_handwriting,
+            font=("Segoe UI", 11), padx=10, pady=3,
+        )
+        self.handwriting_btn.pack(side=tk.LEFT, padx=5)
+
         # Language toggle
         lang_frame = tk.Frame(toolbar, bg=GUI_BG_COLOR)
         lang_frame.pack(side=tk.RIGHT, padx=10)
@@ -257,9 +475,9 @@ class MathSolverGUI:
             bg=GUI_BG_COLOR, font=("Segoe UI", 10),
         )
         self.lang_label.pack(side=tk.LEFT)
-        tk.Radiobutton(lang_frame, text="PL", variable=self.lang, value="pl",
+        tk.Radiobutton(lang_frame, text="🇵🇱 PL", variable=self.lang, value="pl",
                        bg=GUI_BG_COLOR, font=("Segoe UI", 10)).pack(side=tk.LEFT)
-        tk.Radiobutton(lang_frame, text="EN", variable=self.lang, value="en",
+        tk.Radiobutton(lang_frame, text="🇬🇧 EN", variable=self.lang, value="en",
                        bg=GUI_BG_COLOR, font=("Segoe UI", 10)).pack(side=tk.LEFT)
 
         # ── Main content area ──────────────────────────────────────────
@@ -332,6 +550,14 @@ class MathSolverGUI:
             bg=GUI_BG_COLOR, font=("Segoe UI", 9),
         )
         self.easy_cb.pack(side=tk.LEFT, padx=10)
+
+        self.handwriting_cb = tk.Checkbutton(
+            self.full_img_frame,
+            text=_t("chk_use_handwriting", self.lang.get()),
+            variable=self.use_handwriting,
+            bg=GUI_BG_COLOR, font=("Segoe UI", 9),
+        )
+        self.handwriting_cb.pack(side=tk.LEFT, padx=10)
 
         # ── Status bar ─────────────────────────────────────────────────
         status_bar = tk.Frame(self.root, bg="#d0d0d0", pady=2)
@@ -587,6 +813,7 @@ class MathSolverGUI:
         def _export_thread():
             try:
                 from handwriting import render_solutions_pdf
+                use_hw = self.use_handwriting.get()
                 render_solutions_pdf(self.solutions, path, lang=self.lang.get())
                 self.root.after(0, self._pdf_done, path)
             except Exception as e:
@@ -594,6 +821,23 @@ class MathSolverGUI:
 
         thread = threading.Thread(target=_export_thread, daemon=True)
         thread.start()
+
+    def _sample_handwriting(self):
+        """Open the handwriting capture dialog."""
+        lang = self.lang.get()
+        dialog = _HandwritingDialog(self.root, lang=lang)
+        self.root.wait_window(dialog)
+        if dialog.result_path:
+            self.status_var.set(_t("handwriting_saved", lang))
+            self.use_handwriting.set(True)
+        else:
+            # Check if sample already exists
+            sample_path = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                "assets", "fonts", "user_handwriting_sample.png",
+            )
+            if not os.path.isfile(sample_path):
+                self.status_var.set(_t("handwriting_not_saved", lang))
 
     def _pdf_done(self, path: str):
         """Called when PDF export completes."""
