@@ -108,6 +108,7 @@ def run_pipeline(
     full_image: bool = False,
     solver_verbose: bool = False,
     easy_mode: bool = False,
+    ocr_triple_check: bool = True,
 ) -> PipelineResult:
     """
     Run the full solve pipeline on an image.
@@ -161,7 +162,46 @@ def run_pipeline(
         print(f"\n{Colors.BOLD}Step 2: Running OCR...{Colors.END}")
 
     crops = [crop_region(img, r) for r in regions]
-    ocr_results = ocr_all_exercises(crops, use_latex=use_latex)
+
+    if ocr_triple_check and len(crops) > 0:
+        # Run OCR 3 times and use majority voting
+        if verbose:
+            print("  Triple OCR verification enabled — running 3 passes...")
+        all_passes = []
+        for pass_idx in range(3):
+            if verbose:
+                print(f"  --- Pass {pass_idx + 1}/3 ---")
+            all_passes.append(ocr_all_exercises(crops, use_latex=use_latex))
+
+        # Majority voting: for each crop, pick the most common OCR result
+        ocr_results = []
+        for ci in range(len(crops)):
+            texts = [p[ci]["text"] for p in all_passes]
+            latexes = [p[ci].get("math_latex") or "" for p in all_passes]
+
+            # Vote on text
+            from collections import Counter
+            text_vote = Counter(texts).most_common(1)[0]
+            latex_vote = Counter(latexes).most_common(1)[0]
+
+            chosen_text = text_vote[0]
+            chosen_latex = latex_vote[0]
+            agreement = text_vote[1] >= 2 and latex_vote[1] >= 2
+
+            if verbose:
+                status = "OK (all match)" if agreement else "DIFFERS (using majority)"
+                print(f"  Exercise {ci + 1}: text voted {text_vote[1]}/3, "
+                      f"latex voted {latex_vote[1]}/3 — {status}")
+
+            ocr_results.append({
+                "text": chosen_text,
+                "math_latex": chosen_latex if chosen_latex else None,
+                "words": all_passes[0][ci].get("words", []),
+                "merged": chosen_text,
+                "ocr_agreement": agreement,
+            })
+    else:
+        ocr_results = ocr_all_exercises(crops, use_latex=use_latex)
 
     # Step 3: Parse and solve each exercise
     if verbose:
@@ -270,6 +310,8 @@ def parse_args():
                         help="Show verbose step-by-step details for linear equations")
     parser.add_argument("--easy", "-e", action="store_true",
                         help="Use easier solutions (clear fractions via LCD before solving)")
+    parser.add_argument("--no-triple-ocr", action="store_true",
+                        help="Disable triple OCR verification (run OCR once instead of 3 times)")
     return parser.parse_args()
 
 
@@ -310,6 +352,7 @@ def main():
         full_image=args.full_image,
         solver_verbose=args.verbose,
         easy_mode=args.easy,
+        ocr_triple_check=not args.no_triple_ocr,
     )
 
     if not result.solutions or all(not s.is_valid for s in result.solutions):

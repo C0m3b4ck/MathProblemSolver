@@ -161,13 +161,13 @@ def _add_char_variation(
 
 import re as _re
 
-# Pattern: match fractions like 12/5, x/3, 2*x/7, -3/4, etc.
-# Numerator/denominator: digits, x, *, +, -, (, ) — no spaces
+# Pattern: match fractions like 12/5, x/3, 2*x/7, -3/4, 12 / -2, etc.
+# Allows optional spaces around the / operator
 _FRACTION_RE = _re.compile(
     r'(?<![a-zA-Z/\d])'         # not preceded by letter, slash, or digit
     r'(-?)'                      # optional negative sign
     r'([\d\w\+\-\*\(\)]+?)'     # numerator: digits, x, operators, parens
-    r'/'
+    r'\s*/\s*'                   # slash with optional spaces
     r'([\d\w\+\-\*\(\)]+?)'     # denominator: same
     r'(?![a-zA-Z/\d])'          # not followed by letter, slash, or digit
 )
@@ -332,6 +332,7 @@ def render_solutions_pdf(
     output_path: Optional[str] = None,
     title: str = "Rozwiązania",
     lang: str = "pl",
+    fraction_bars: bool = True,
 ) -> str:
     """
     Render solutions to a PDF file with handwriting-style font on lined paper.
@@ -436,7 +437,7 @@ def render_solutions_pdf(
         c.setFillColorRGB(*[c / 255 for c in TITLE_COLOR])
         title_color = tuple(c / 255 for c in TITLE_COLOR)
         problem_text = f"Zadanie: {solution.problem}" if lang == "pl" else f"Problem: {solution.problem}"
-        has_frac_prob = bool(_FRACTION_RE.search(problem_text))
+        has_frac_prob = bool(_FRACTION_RE.search(problem_text)) and fraction_bars
         if has_frac_prob:
             wrapped = _wrap_text_with_fractions(
                 problem_text, measure_font, usable_width, c, font_name, body_size
@@ -468,7 +469,7 @@ def render_solutions_pdf(
                 y = page_h - margin_top
 
             step_text = f"  → {step.text}"
-            has_fracs = bool(_FRACTION_RE.search(step_text))
+            has_fracs = bool(_FRACTION_RE.search(step_text)) and fraction_bars
             if has_fracs:
                 wrapped = _wrap_text_with_fractions(
                     step_text, measure_font, usable_width - 20, c, font_name, body_size
@@ -496,7 +497,7 @@ def render_solutions_pdf(
 
         answer_color = tuple(c / 255 for c in ANSWER_COLOR)
         answer_label = f"  Odpowiedź: {solution.answer}" if lang == "pl" else f"  Answer: {solution.answer}"
-        has_frac_answer = bool(_FRACTION_RE.search(answer_label))
+        has_frac_answer = bool(_FRACTION_RE.search(answer_label)) and fraction_bars
         if has_frac_answer:
             _draw_text_with_fractions(
                 c, margin_left, y, answer_label,

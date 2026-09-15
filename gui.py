@@ -83,6 +83,13 @@ _STRINGS = {
         "chk_use_handwriting": "Użyj mojego pisma do zapisu",
         "handwriting_saved": "Próbka pisma zapisana!",
         "handwriting_not_saved": "Brak próbki pisma",
+        # New features
+        "chk_ocr_triple": "Potrójna weryfikacja OCR",
+        "chk_fraction_bars": "Kreski ułamkowe w PDF",
+        "sys_cpu": "CPU: {pct}%",
+        "sys_ram": "RAM: {pct}% ({mb} MB)",
+        "ocr_verify_ok": "Potrójna weryfikacja: OK (zgodne)",
+        "ocr_verify_fail": "Potrójna weryfikacja: różnice w wynikach OCR",
     },
     "en": {
         # Window
@@ -141,6 +148,13 @@ _STRINGS = {
         "chk_use_handwriting": "Use my handwriting for output",
         "handwriting_saved": "Handwriting sample saved!",
         "handwriting_not_saved": "No handwriting sample found",
+        # New features
+        "chk_ocr_triple": "Triple OCR verification",
+        "chk_fraction_bars": "Fraction bars in PDF",
+        "sys_cpu": "CPU: {pct}%",
+        "sys_ram": "RAM: {pct}% ({mb} MB)",
+        "ocr_verify_ok": "Triple verification: OK (all match)",
+        "ocr_verify_fail": "Triple verification: OCR results differ",
     },
 }
 
@@ -359,6 +373,8 @@ class MathSolverGUI:
         self.solver_verbose = tk.BooleanVar(value=False)
         self.easy_mode = tk.BooleanVar(value=False)
         self.use_handwriting = tk.BooleanVar(value=False)
+        self.ocr_triple_check = tk.BooleanVar(value=True)
+        self.show_fraction_bars = tk.BooleanVar(value=True)
         self.status_var = tk.StringVar()
 
         # Trace language changes to update all labels
@@ -429,10 +445,27 @@ class MathSolverGUI:
         self.verbose_cb.config(text=_t("chk_verbose", lang))
         self.easy_cb.config(text=_t("chk_easy", lang))
         self.handwriting_cb.config(text=_t("chk_use_handwriting", lang))
+        self.ocr_triple_cb.config(text=_t("chk_ocr_triple", lang))
+        self.frac_bars_cb.config(text=_t("chk_fraction_bars", lang))
 
         # Preview placeholder (only if no image loaded)
         if not self.image_path:
             self.preview_label.config(text=_t("preview_empty", lang))
+
+    def _update_system_stats(self):
+        """Update CPU and RAM usage labels every 2 seconds."""
+        try:
+            import psutil
+            cpu_pct = psutil.cpu_percent(interval=0)
+            mem = psutil.virtual_memory()
+            ram_pct = mem.percent
+            ram_mb = int(mem.used / (1024 * 1024))
+            lang = self.lang.get()
+            self.cpu_label.config(text=_t("sys_cpu", lang, pct=int(cpu_pct)))
+            self.ram_label.config(text=_t("sys_ram", lang, pct=int(ram_pct), mb=ram_mb))
+        except Exception:
+            pass
+        self.root.after(2000, self._update_system_stats)
 
     def _build_ui(self):
         """Build the GUI layout."""
@@ -583,6 +616,41 @@ class MathSolverGUI:
         )
         self.handwriting_cb.pack(side=tk.LEFT, padx=10)
 
+        self.ocr_triple_cb = tk.Checkbutton(
+            self.full_img_frame,
+            text=_t("chk_ocr_triple", self.lang.get()),
+            variable=self.ocr_triple_check,
+            bg=GUI_BG_COLOR, font=("Segoe UI", 9),
+        )
+        self.ocr_triple_cb.pack(side=tk.LEFT, padx=10)
+
+        self.frac_bars_cb = tk.Checkbutton(
+            self.full_img_frame,
+            text=_t("chk_fraction_bars", self.lang.get()),
+            variable=self.show_fraction_bars,
+            bg=GUI_BG_COLOR, font=("Segoe UI", 9),
+        )
+        self.frac_bars_cb.pack(side=tk.LEFT, padx=10)
+
+        # ── CPU / RAM counter (above checkboxes) ────────────────────────
+        self.sys_frame = tk.Frame(self.root, bg="#e8e8e8", pady=1)
+        self.sys_frame.pack(fill=tk.X, side=tk.BOTTOM)
+
+        self.cpu_label = tk.Label(
+            self.sys_frame, text="CPU: ---%",
+            bg="#e8e8e8", font=("Consolas", 9), anchor=tk.W, fg="#555",
+        )
+        self.cpu_label.pack(side=tk.LEFT, padx=10)
+
+        self.ram_label = tk.Label(
+            self.sys_frame, text="RAM: ---% (-- MB)",
+            bg="#e8e8e8", font=("Consolas", 9), anchor=tk.W, fg="#555",
+        )
+        self.ram_label.pack(side=tk.LEFT, padx=10)
+
+        # Start periodic system stats update
+        self._update_system_stats()
+
         # ── Status bar ─────────────────────────────────────────────────
         status_bar = tk.Frame(self.root, bg="#d0d0d0", pady=2)
         status_bar.pack(fill=tk.X, side=tk.BOTTOM)
@@ -654,6 +722,7 @@ class MathSolverGUI:
                 full_image=self.full_image.get(),
                 solver_verbose=self.solver_verbose.get(),
                 easy_mode=self.easy_mode.get(),
+                ocr_triple_check=self.ocr_triple_check.get(),
             )
             self.root.after(0, self._display_result, result)
         except Exception as e:
@@ -838,7 +907,8 @@ class MathSolverGUI:
             try:
                 from handwriting import render_solutions_pdf
                 use_hw = self.use_handwriting.get()
-                render_solutions_pdf(self.solutions, path, lang=self.lang.get())
+                render_solutions_pdf(self.solutions, path, lang=self.lang.get(),
+                                     fraction_bars=self.show_fraction_bars.get())
                 self.root.after(0, self._pdf_done, path)
             except Exception as e:
                 self.root.after(0, self._show_error, str(e))
