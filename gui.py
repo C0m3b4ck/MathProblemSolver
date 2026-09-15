@@ -249,12 +249,6 @@ class MathSolverGUI:
         tk.Radiobutton(lang_frame, text="EN", variable=self.lang, value="en",
                        bg=GUI_BG_COLOR, font=("Segoe UI", 10)).pack(side=tk.LEFT)
 
-        # Full image toggle
-        tk.Checkbutton(
-            lang_frame, text="Full image", variable=self.full_image,
-            bg=GUI_BG_COLOR, font=("Segoe UI", 9),
-        ).pack(side=tk.LEFT, padx=(10, 0))
-
         # ── Main content area ──────────────────────────────────────────
         content = tk.Frame(self.root, bg=GUI_BG_COLOR)
         content.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
@@ -299,6 +293,16 @@ class MathSolverGUI:
         self.results_text.tag_configure("answer", foreground="#006600", font=("Consolas", 11, "bold"))
         self.results_text.tag_configure("error", foreground="#CC0000")
         self.results_text.tag_configure("problem", foreground="#000099")
+
+        # Full image toggle — bottom left
+        self.full_img_frame = tk.Frame(self.root, bg=GUI_BG_COLOR, pady=2)
+        self.full_img_frame.pack(fill=tk.X, side=tk.BOTTOM)
+
+        self.full_img_cb = tk.Checkbutton(
+            self.full_img_frame, text="Full image scanning", variable=self.full_image,
+            bg=GUI_BG_COLOR, font=("Segoe UI", 9),
+        )
+        self.full_img_cb.pack(side=tk.LEFT, padx=10)
 
         # ── Status bar ─────────────────────────────────────────────────
         status_bar = tk.Frame(self.root, bg="#d0d0d0", pady=2)

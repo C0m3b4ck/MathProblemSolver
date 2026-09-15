@@ -31,70 +31,69 @@ _TRANSFORMATIONS = standard_transformations + (
 # ── LaTeX → plain text math converter ──────────────────────────────────────
 
 def _latex_to_text(latex_str: str) -> str:
-    """
-    Convert LaTeX math to plain-text math that sympy can parse.
-
-    Handles:
-      \frac{a}{b}  → (a)/(b)
-      \sqrt{a}     → sqrt(a)
-      x^{n}        → x**(n)
-      x^{2}        → x**2
-      \cdot        → *
-      \times       → *
-      \div         → /
-      \left( \right) → ( )
-      \mathrm{...} → ...
-      \quad, \qquad → (removed)
-      ^{...}       → **(...)
-    """
+    """Convert LaTeX math to plain-text math that sympy can parse."""
     s = latex_str
 
+    # Strip \begin{array}...\end{array} wrapper
+    s = re.sub(r"\\begin\{[^{}]*\}", "", s)
+    s = re.sub(r"\\end\{[^{}]*\}", "", s)
+
+    # Strip \mathrm{...} wrappers (iterative to handle nesting)
+    for _ in range(5):
+        prev = s
+        s = re.sub(r"\\mathrm\{([^{}]*)\}", r"\1", s)
+        if s == prev:
+            break
+    s = re.sub(r"\\mathrm\{", "", s)
+
     # \frac{num}{den} → (num)/(den)
-    # Handle nested: \frac{1}{3} → (1)/(3)
-    depth = 0
-    while r"\frac{" in s and depth < 10:
-        depth += 1
+    for _ in range(10):
+        prev = s
         s = re.sub(
             r"\\frac\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}",
             r"(\1)/(\2)",
             s,
         )
+        if s == prev:
+            break
 
     # \sqrt{a} → sqrt(a)
     s = re.sub(r"\\sqrt\{([^{}]+)\}", r"sqrt(\1)", s)
 
-    # x^{...} → x**(...)  and  x^{2} → x**2
+    # x^{...} → x**(...)
     s = re.sub(r"\^\{([^{}]+)\}", r"**(\1)", s)
-    s = re.sub(r"\^(\d+)", r"**(\1)", s)
+    s = re.sub(r"\^(\d+)", r"**\1", s)
 
-    # \cdot, \times → *
-    s = s.replace(r"\cdot", "*")
-    s = s.replace(r"\times", "*")
-    s = s.replace(r"\div", "/")
+    # Operators
+    s = s.replace(r"\cdot", "*").replace(r"\times", "*").replace(r"\div", "/")
 
-    # \left( \right) → ( )
+    # \left / \right → parens
     s = s.replace(r"\left(", "(").replace(r"\right)", ")")
     s = s.replace(r"\left[", "[").replace(r"\right]", "]")
+    s = re.sub(r"\\left[^()\[\]|]", "(", s)
+    s = re.sub(r"\\right[^()\[\]|]", ")", s)
 
-    # \mathrm{X} → X
-    s = re.sub(r"\\mathrm\{([^{}]+)\}", r"\1", s)
-
-    # \quad, \qquad, \; \, \! → space or remove
+    # Spacing
+    s = s.replace("~", " ")
     s = re.sub(r"\\q?quad\s*", " ", s)
     s = re.sub(r"\\;\s*", " ", s)
     s = re.sub(r"\\,\s*", " ", s)
     s = re.sub(r"\\!\s*", "", s)
 
-    # Remove remaining \commands (common ones)
-    s = s.replace(r"\text{", "").replace("}", "")
+    # Remove remaining \commands
     s = re.sub(r"\\[a-zA-Z]+\s*", " ", s)
 
-    # Clean up: **1 → **1 (already fine), but fix **(1) if it's a simple number
+    # Remove stray braces
+    s = s.replace("{", "").replace("}", "")
+
+    # Normalize case: X → x (Pix2Tex outputs uppercase X)
+    s = re.sub(r"(?<![a-zA-Z])X(?![a-zA-Z])", "x", s)
+
+    # Fix **(1) → **1
     s = re.sub(r"\*\*\((\d+)\)", r"**\1", s)
 
     # Collapse spaces
     s = re.sub(r"\s+", " ", s).strip()
-
     return s
 
 
@@ -144,6 +143,10 @@ def clean_ocr_text(text: str) -> str:
     result = text.strip()
     for old, new in _OCR_SUBSTITUTIONS.items():
         result = result.replace(old, new)
+    # Strip underscores (OCR noise — not used in grade 7-8 math)
+    result = result.replace("_", "")
+    # Normalize uppercase X → x (OCR often outputs uppercase, solver expects lowercase)
+    result = re.sub(r"(?<![a-zA-Z])X(?![a-zA-Z])", "x", result)
     # Collapse multiple spaces
     result = re.sub(r"\s+", " ", result).strip()
     return result
@@ -366,65 +369,94 @@ def extract_problem_context(text: str) -> dict:
 def _split_latex_expressions(latex_str: str) -> List[str]:
     """
     Split a LaTeX string that contains multiple expressions into individual parts.
-
-    Pix2Tex may output something like:
-      "a) \\frac{1}{3}x - 2 = x + 2 \\quad d) \\frac{x}{6} - \\frac{1}{6} = 1"
-    or:
-      "\\frac{1}{3}x - 2 = x + 2 \\\\ \\frac{x}{6} - \\frac{1}{6} = 1"
-
-    This function splits on:
-      - LaTeX line breaks: \\\\, \\newline, \\[...\\]
-      - Spacing commands: \\quad, \\qquad, \\;, \\, \\!
-      - Exercise labels: a), b), 1), 2), (a), etc.
-      - Double newlines
+    Handles \\begin{array}, \\, &, exercise labels, etc.
+    Preserves \\frac, \\sqrt etc. for _latex_to_text to convert later.
     """
     if not latex_str:
         return []
 
     result = latex_str
 
-    # Split on LaTeX line breaks
-    result = re.split(r"\\\\+|\\newline|\\\[.*?\]", result)
+    # Strip \begin{array}...\end{array} wrapper
+    result = re.sub(r"\\begin\{[^{}]*\}", "", result)
+    result = re.sub(r"\\end\{[^{}]*\}", "", result)
+
+    # Split on LaTeX line breaks and column separators
+    parts = re.split(r"\\\\+|&", result)
 
     # Further split each part on \quad, \qquad, etc.
-    parts = []
-    for segment in result:
+    expanded = []
+    for segment in parts:
         segment = segment.strip()
         if not segment:
             continue
         sub_parts = re.split(r"\\q?quad\s*|\\;\s*|\\,\s*|\\!\s*", segment)
-        parts.extend(sub_parts)
+        expanded.extend(sub_parts)
 
-    # Further split on exercise labels like "a)", "b)", "1.", "Zadanie 3"
-    final = []
-    for part in parts:
-        part = part.strip()
-        if not part:
-            continue
-        # Split on labels: "a) ... b)" → ["...", "..."]
-        # But keep the math together — only split if label starts a new equation
-        split_parts = re.split(
-            r"(?=\b[a-zA-Z]\)\s*(?:\\[a-z]|[\d\-\(\\]))"
-            r"|(?=\b\d{1,2}[a-z]?[\.\)]\s*(?:\\[a-z]|[\d\-\(\\]))"
-            r"|(?=\\text\{[a-zA-Z]\)\})",
-            part
-        )
-        for sp in split_parts:
-            sp = sp.strip()
-            if sp:
-                final.append(sp)
-
-    # Clean up: remove leading labels like "a) ", "1. "
+    # Clean exercise labels from each part, but PRESERVE math commands
     cleaned = []
-    for expr in final:
-        expr = re.sub(r"^[a-zA-Z]\)\s*", "", expr)
-        expr = re.sub(r"^\d{1,2}[a-z]?[\.\)]\s*", "", expr)
-        expr = re.sub(r"^\\text\{[a-zA-Z]\)\}\s*", "", expr)
+    for expr in expanded:
         expr = expr.strip()
-        if expr and len(expr) > 1:
+        if not expr or len(expr) < 2:
+            continue
+
+        # Strip \mathrm{...} with proper brace matching (preserves nested \frac)
+        expr = _strip_cmd_wrappers(expr, "mathrm")
+
+        # NOTE: We do NOT strip outer {{...}} braces here.
+        # Let _latex_to_text handle all brace cleanup — it converts \frac{}{}
+        # first (removing those braces), then strips all remaining stray braces.
+        # Stripping braces here risks removing the closing } of \frac{4}{7} etc.
+
+        # Strip exercise labels: "a) ", "b~", "i~", etc. (start only)
+        expr = re.sub(r"^[a-zA-Z]\s*[)\.~]\s*", "", expr)
+        expr = re.sub(r"^\d{1,2}[a-z]?[\.\)]\s*", "", expr)
+
+        # Remove ~ (non-breaking space)
+        expr = expr.replace("~", " ")
+
+        # Collapse spaces
+        expr = re.sub(r"\s+", " ", expr).strip()
+
+        # Final cleanup: strip any leading non-math text before the first
+        # digit, variable, minus, or \frac. This removes leftover labels
+        # like "a i" or "b" that weren't caught by the label regex.
+        m = re.search(r"(?:(?:[\-]?\d|[\-\(]|\\frac|\\sqrt|[a-zA-Z]\s*[=+\-*/^]))", expr)
+        if m:
+            expr = expr[m.start():]
+
+        # Skip if no math content
+        if not re.search(r"[\d=+\-*/^xX]", expr):
+            continue
+        if expr:
             cleaned.append(expr)
 
     return cleaned if cleaned else [latex_str]
+
+
+def _strip_cmd_wrappers(expr: str, cmd: str) -> str:
+    """
+    Strip \\cmd{...} wrappers from a LaTeX string, handling nested braces.
+    E.g., \\mathrm{a {\\frac{1}{3}}} → a {\\frac{1}{3}}
+    """
+    pattern = re.compile(r"\\" + cmd + r"\{")
+    result = expr
+    for _ in range(10):
+        m = pattern.search(result)
+        if not m:
+            break
+        start = m.end()  # position after the opening {
+        depth = 1
+        i = start
+        while i < len(result) and depth > 0:
+            if result[i] == "{":
+                depth += 1
+            elif result[i] == "}":
+                depth -= 1
+            i += 1
+        inner = result[start:i - 1]
+        result = result[:m.start()] + inner + result[i:]
+    return result
 
 
 # ── Parsing a single exercise (combines everything) ────────────────────────
@@ -462,10 +494,11 @@ def parse_exercise(raw_text: str, math_ocr_text: Optional[str] = None) -> dict:
             if not line:
                 continue
             # Split on exercise labels: a), b), c) etc.
-            # Only split when label is at start of line OR after 3+ spaces
-            # (column boundary). This avoids splitting "3 - x)" inside equations.
+            # Split when label is at start of line OR preceded by whitespace.
+            # Only match labels a-f (typical exercise labels) to avoid breaking
+            # things like "(3-x)" where 'x)' is not a label.
             label_parts = re.split(
-                r"(?:^| {3,})(?=[a-z]\)\s)",
+                r"(?:^|(?<=\s))(?=[a-f]\)\s)",
                 line,
             )
             for lp in label_parts:
@@ -505,6 +538,17 @@ def parse_exercise(raw_text: str, math_ocr_text: Optional[str] = None) -> dict:
             expressions.append(expr)
         else:
             unparsed.append(line)
+
+    # Deduplicate equations (same lhs-rhs pair)
+    seen_eqs = set()
+    unique_equations = []
+    for eq in equations:
+        lhs, op, rhs = eq
+        key = (str(lhs), op, str(rhs))
+        if key not in seen_eqs:
+            seen_eqs.add(key)
+            unique_equations.append(eq)
+    equations = unique_equations
 
     return {
         "raw": raw_text,
