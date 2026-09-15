@@ -140,6 +140,7 @@ class MathSolverGUI:
         self.solutions = []
         self._last_diagnostics = []
         self.lang = tk.StringVar(value=DEFAULT_LANGUAGE)
+        self.full_image = tk.BooleanVar(value=False)
         self.status_var = tk.StringVar()
 
         # Trace language changes to update all labels
@@ -247,6 +248,12 @@ class MathSolverGUI:
                        bg=GUI_BG_COLOR, font=("Segoe UI", 10)).pack(side=tk.LEFT)
         tk.Radiobutton(lang_frame, text="EN", variable=self.lang, value="en",
                        bg=GUI_BG_COLOR, font=("Segoe UI", 10)).pack(side=tk.LEFT)
+
+        # Full image toggle
+        tk.Checkbutton(
+            lang_frame, text="Full image", variable=self.full_image,
+            bg=GUI_BG_COLOR, font=("Segoe UI", 9),
+        ).pack(side=tk.LEFT, padx=(10, 0))
 
         # ── Main content area ──────────────────────────────────────────
         content = tk.Frame(self.root, bg=GUI_BG_COLOR)
@@ -361,6 +368,7 @@ class MathSolverGUI:
                 use_latex=True,
                 generate_pdf=False,
                 verbose=False,
+                full_image=self.full_image.get(),
             )
             self.root.after(0, self._display_result, result)
         except Exception as e:

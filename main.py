@@ -105,6 +105,7 @@ def run_pipeline(
     generate_pdf: bool = False,
     pdf_output: str = None,
     verbose: bool = True,
+    full_image: bool = False,
 ) -> PipelineResult:
     """
     Run the full solve pipeline on an image.
@@ -134,7 +135,7 @@ def run_pipeline(
         print(f"  File: {image_path}")
 
     try:
-        img, regions, binary = segment_exercises(image_path)
+        img, regions, binary = segment_exercises(image_path, full_image=full_image)
     except Exception as e:
         msg = f"Failed to load image: {e}"
         result.error = msg
@@ -249,6 +250,8 @@ def parse_args():
                         help="Solver language (default: pl)")
     parser.add_argument("--pdf", action="store_true",
                         help="Generate handwriting PDF output")
+    parser.add_argument("--full-image", "-f", action="store_true",
+                        help="Skip segmentation, send entire image to OCR (best for screenshots/typeset math)")
     parser.add_argument("--no-latex", action="store_true",
                         help="Skip Pix2Tex (use Tesseract only)")
     parser.add_argument("--output", type=str, default=None,
@@ -296,6 +299,7 @@ def main():
         generate_pdf=args.pdf,
         pdf_output=args.output,
         verbose=not args.quiet,
+        full_image=args.full_image,
     )
 
     if not result.solutions or all(not s.is_valid for s in result.solutions):

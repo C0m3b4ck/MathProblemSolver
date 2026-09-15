@@ -12,7 +12,7 @@ from sympy import (
     symbols, sympify, Eq, S, solve, solve_univariate_inequality,
     Rational, Integer, Float,
     sqrt, Abs, simplify, expand, factor, cancel, together,
-    oo, pi, log, ln,
+    oo, pi, log, ln, degree,
     latex as sympy_latex,
 )
 from sympy.core.relational import Relational
@@ -696,6 +696,56 @@ def solve_system(eq1_lhs, eq1_rhs, eq2_lhs, eq2_rhs, lang: str = "pl") -> Soluti
 #  AUTO-DETECT SOLVER (main entry point)
 # ═══════════════════════════════════════════════════════════════════════════
 
+def _solve_single_equation(equation_tuple, lang: str = "pl") -> List[Solution]:
+    """Solve a single equation (lhs, op, rhs) and return a list of solutions."""
+    lhs, op, rhs = equation_tuple
+    solutions = []
+
+    if op != "=":
+        sol = solve_inequality(lhs, op, rhs, lang)
+        solutions.append(sol)
+        return solutions
+
+    x = symbols("x")
+    diff = expand(lhs - rhs)
+    try:
+        deg = degree(diff, x)
+    except (AttributeError, ValueError, TypeError):
+        deg = 0
+
+    if deg == 2:
+        sol = solve_quadratic(lhs, rhs, lang)
+        solutions.append(sol)
+    elif deg == 1:
+        sol = solve_linear_equation(lhs, rhs, lang)
+        solutions.append(sol)
+    elif deg == 0:
+        if diff == 0:
+            answer = get_step("eq_infinite_solutions", lang)
+            solutions.append(Solution(
+                f"{sympy_to_text(lhs)} = {sympy_to_text(rhs)}",
+                get_method_name("arithmetic", lang), "arithmetic",
+                [_step(answer)], answer,
+            ))
+        else:
+            answer = get_step("eq_no_solution", lang)
+            solutions.append(Solution(
+                f"{sympy_to_text(lhs)} = {sympy_to_text(rhs)}",
+                get_method_name("arithmetic", lang), "arithmetic",
+                [_step(answer)], answer,
+            ))
+    else:
+        sol = solve(Eq(lhs, rhs), x)
+        answer = ", ".join(f"x = {sympy_to_text(s)}" for s in sol)
+        solutions.append(Solution(
+            f"{sympy_to_text(lhs)} = {sympy_to_text(rhs)}",
+            get_method_name("linear_equation", lang), "linear_equation",
+            [_step(get_step("eq_solution", lang, solution=answer))], answer,
+        ))
+
+    return solutions
+
+
 def solve_problem(
     expressions: list,
     equations: list,
@@ -716,7 +766,14 @@ def solve_problem(
     """
     solutions = []
 
-    # ── System of equations ─────────────────────────────────────────────
+    # ── Multiple independent equations — solve each one ────────────────
+    if len(equations) > 2:
+        for eq in equations:
+            sols = _solve_single_equation(eq, lang)
+            solutions.extend(sols)
+        return solutions
+
+    # ── System of equations (exactly 2) ────────────────────────────────
     if len(equations) == 2:
         eq1_lhs, eq1_op, eq1_rhs = equations[0]
         eq2_lhs, eq2_op, eq2_rhs = equations[1]
@@ -725,55 +782,10 @@ def solve_problem(
             solutions.append(sol)
             return solutions
 
-    # ── Single equation ─────────────────────────────────────────────────
+    # ── Single equation ────────────────────────────────────────────────
     if len(equations) == 1:
-        lhs, op, rhs = equations[0]
-
-        if op != "=":
-            sol = solve_inequality(lhs, op, rhs, lang)
-            solutions.append(sol)
-            return solutions
-
-        # Determine if linear or quadratic
-        x = symbols("x")
-        diff = expand(lhs - rhs)
-        degree = 0
-        try:
-            degree = diff.degree(x)
-        except (AttributeError, ValueError):
-            pass
-
-        if degree == 2:
-            sol = solve_quadratic(lhs, rhs, lang)
-            solutions.append(sol)
-        elif degree == 1:
-            sol = solve_linear_equation(lhs, rhs, lang)
-            solutions.append(sol)
-        elif degree == 0:
-            # Constant equation — check if identity or contradiction
-            if diff == 0:
-                answer = get_step("eq_infinite_solutions", lang)
-                solutions.append(Solution(
-                    f"{sympy_to_text(lhs)} = {sympy_to_text(rhs)}",
-                    get_method_name("arithmetic", lang), "arithmetic",
-                    [_step(answer)], answer,
-                ))
-            else:
-                answer = get_step("eq_no_solution", lang)
-                solutions.append(Solution(
-                    f"{sympy_to_text(lhs)} = {sympy_to_text(rhs)}",
-                    get_method_name("arithmetic", lang), "arithmetic",
-                    [_step(answer)], answer,
-                ))
-        else:
-            # Try SymPy solve for higher degree
-            sol = solve(Eq(lhs, rhs), x)
-            answer = ", ".join(f"x = {sympy_to_text(s)}" for s in sol)
-            solutions.append(Solution(
-                f"{sympy_to_text(lhs)} = {sympy_to_text(rhs)}",
-                get_method_name("linear_equation", lang), "linear_equation",
-                [_step(get_step("eq_solution", lang, solution=answer))], answer,
-            ))
+        sols = _solve_single_equation(equations[0], lang)
+        solutions.extend(sols)
         return solutions
 
     # ── No equations — handle expressions and context ───────────────────

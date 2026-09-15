@@ -1,6 +1,7 @@
 """
 Image preprocessing and exercise segmentation.
 Cleans the input image and splits it into individual exercise regions.
+Supports both segmented and full-image OCR modes.
 """
 
 import os
@@ -64,23 +65,17 @@ def adaptive_threshold(gray: np.ndarray) -> np.ndarray:
 
 
 def deskew(binary: np.ndarray) -> np.ndarray:
-    """
-    Correct small rotations (deskew) using the minimum-area bounding rect
-    of all foreground pixels.
-    """
+    """Correct small rotations (deskew)."""
     coords = np.column_stack(np.where(binary < 128))
     if len(coords) < 50:
         return binary
 
     angle = cv2.minAreaRect(coords)[-1]
-
-    # minAreaRect returns angles in [-90, 0)
     if angle < -45:
         angle = -(90 + angle)
     else:
         angle = -angle
 
-    # Only correct small tilts (up to 15 degrees)
     if abs(angle) > 15:
         return binary
 
@@ -98,9 +93,6 @@ def deskew(binary: np.ndarray) -> np.ndarray:
 def clean_image(img: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     """
     Full preprocessing pipeline: BGR image → (cleaned_binary, cleaned_gray).
-
-    Returns:
-        Tuple of (binary image for segmentation, grayscale for OCR).
     """
     gray = to_grayscale(img)
     gray = denoise(gray)
@@ -115,54 +107,37 @@ def clean_image(img: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
 def find_exercise_regions(binary: np.ndarray) -> List[Tuple[int, int, int, int]]:
     """
     Find rectangular regions that likely contain exercises.
-
-    Strategy:
-      1. Detect horizontal lines (e.g., ruled paper, separators)
-      2. If few/no lines detected, fall back to contour-based detection
-      3. Merge overlapping or nearby regions
-
-    Returns:
-        List of (x, y, w, h) bounding boxes, sorted top-to-bottom.
     """
     h, w = binary.shape
 
-    # Strategy 1: Detect horizontal lines
     regions = _detect_by_lines(binary)
     if regions:
         return _merge_and_sort(regions, w, h)
 
-    # Strategy 2: Detect by contours
     regions = _detect_by_contours(binary)
     if regions:
         return _merge_and_sort(regions, w, h)
 
-    # Fallback: treat the whole image as one exercise
     return [(0, 0, w, h)]
 
 
 def _detect_by_lines(binary: np.ndarray) -> List[Tuple[int, int, int, int]]:
-    """
-    Detect horizontal ruled lines and extract regions between them.
-    Common in notebook paper or whiteboard photos.
-    """
+    """Detect horizontal ruled lines and extract regions between them."""
     h, w = binary.shape
 
-    # Detect horizontal lines using morphological operations
     kernel_len = max(w // 8, 50)
     horizontal_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kernel_len, 1))
     horizontal = cv2.morphologyEx(
         cv2.bitwise_not(binary), cv2.MORPH_OPEN, horizontal_kernel, iterations=2
     )
 
-    # Find the y-coordinates of horizontal lines
     line_projection = np.sum(horizontal, axis=1)
-    threshold = w * 128  # at least half the width should be foreground
+    threshold = w * 128
     line_rows = np.where(line_projection > threshold)[0]
 
     if len(line_rows) < 2:
         return []
 
-    # Group consecutive rows into single lines
     lines = []
     group_start = line_rows[0]
     for i in range(1, len(line_rows)):
@@ -171,32 +146,25 @@ def _detect_by_lines(binary: np.ndarray) -> List[Tuple[int, int, int, int]]:
             group_start = line_rows[i]
     lines.append((group_start + line_rows[-1]) // 2)
 
-    # Extract regions between consecutive lines
     regions = []
     for i in range(len(lines) - 1):
         y_top = lines[i] + 3
         y_bot = lines[i + 1] - 3
-        if y_bot - y_top > 20:  # minimum region height
+        if y_bot - y_top > 20:
             regions.append((0, y_top, w, y_bot - y_top))
 
     return regions
 
 
 def _detect_by_contours(binary: np.ndarray) -> List[Tuple[int, int, int, int]]:
-    """
-    Detect exercise regions using contour detection on the binary image.
-    Looks for rectangular regions that contain text.
-    """
+    """Detect exercise regions using contour detection."""
     h, w = binary.shape
 
-    # Invert so text is white
     inverted = cv2.bitwise_not(binary)
 
-    # Dilate to connect characters into word/line blobs
     dilate_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (w // 4, 3))
     dilated = cv2.dilate(inverted, dilate_kernel, iterations=2)
 
-    # Find contours
     contours, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     regions = []
@@ -206,11 +174,9 @@ def _detect_by_contours(binary: np.ndarray) -> List[Tuple[int, int, int, int]]:
 
         if area < MIN_CONTOUR_AREA:
             continue
-
-        # Filter out very thin or very wide regions (likely noise or borders)
         if ch < 15 or cw < 30:
             continue
-        if cw > w * 0.98:  # nearly full width = likely a border, not exercise
+        if cw > w * 0.98:
             continue
 
         regions.append((x, y, cw, ch))
@@ -223,22 +189,16 @@ def _merge_and_sort(
     img_width: int,
     img_height: int,
 ) -> List[Tuple[int, int, int, int]]:
-    """
-    Merge overlapping/nearby regions and sort top-to-bottom.
-    """
+    """Merge overlapping/nearby regions and sort top-to-bottom."""
     if not regions:
         return []
 
-    # Sort by y-coordinate
     regions.sort(key=lambda r: r[1])
 
-    # Merge regions that overlap vertically or are very close
     merged = [regions[0]]
     for x, y, w, h in regions[1:]:
         px, py, pw, ph = merged[-1]
-        # Check vertical proximity (within 30px)
         if y <= py + ph + 30:
-            # Merge: take bounding box of both
             nx = min(px, x)
             ny = min(py, y)
             nw = max(px + pw, x + w) - nx
@@ -247,7 +207,6 @@ def _merge_and_sort(
         else:
             merged.append((x, y, w, h))
 
-    # Add padding and clip to image bounds
     padded = []
     for x, y, w, h in merged:
         x1 = max(0, x - SEGMENT_PADDING)
@@ -259,24 +218,68 @@ def _merge_and_sort(
     return padded
 
 
+# ── Full-image mode ────────────────────────────────────────────────────────
+
+def should_use_full_image(binary: np.ndarray, regions: List[Tuple[int, int, int, int]]) -> bool:
+    """
+    Decide whether segmentation produced useful results, or if we should
+    fall back to full-image OCR.
+
+    Returns True if:
+      - Only 1 region found AND it covers < 50% of the image height
+      - Or only 1 region AND it's very short (< 15% of image height)
+    """
+    if len(regions) == 0:
+        return True
+
+    if len(regions) == 1:
+        _, _, _, rh = regions[0]
+        _, ih = binary.shape
+        coverage = rh / ih if ih > 0 else 0
+        if coverage < 0.50:
+            return True
+        if rh < ih * 0.15:
+            return True
+
+    return False
+
+
+def get_full_image_region(binary: np.ndarray) -> Tuple[int, int, int, int]:
+    """Return a region covering the entire image."""
+    h, w = binary.shape
+    return (0, 0, w, h)
+
+
+# ── Pipeline helpers ───────────────────────────────────────────────────────
+
 def segment_exercises(
     image_path: str,
+    full_image: bool = False,
 ) -> Tuple[np.ndarray, List[Tuple[int, int, int, int]], np.ndarray]:
     """
     Full segmentation pipeline: load image, clean, segment.
 
     Args:
         image_path: Path to the input image.
+        full_image: If True, skip segmentation and return the whole image.
 
     Returns:
-        Tuple of:
-          - original image (BGR)
-          - list of (x, y, w, h) regions
-          - cleaned binary image
+        Tuple of (original image, list of regions, cleaned binary image).
     """
     img = load_image(image_path)
     binary, _ = clean_image(img)
+
+    if full_image:
+        regions = [get_full_image_region(binary)]
+        return img, regions, binary
+
     regions = find_exercise_regions(binary)
+
+    # Auto-detect: if segmentation produced a tiny region, use full image
+    if should_use_full_image(binary, regions):
+        print("  [Preprocessing] Segmentation produced poor results — using full image")
+        regions = [get_full_image_region(binary)]
+
     return img, regions, binary
 
 
@@ -310,7 +313,7 @@ def display_regions(
     img: np.ndarray,
     regions: List[Tuple[int, int, int, int]],
 ) -> np.ndarray:
-    """Draw detected regions on a copy of the image (for debugging/preview)."""
+    """Draw detected regions on a copy of the image (for debugging)."""
     preview = img.copy()
     for i, (x, y, w, h) in enumerate(regions):
         cv2.rectangle(preview, (x, y), (x + w, y + h), (0, 255, 0), 2)
