@@ -2,6 +2,7 @@
 """
 MathExerciseSolver — Tkinter GUI.
 Provides a simple windowed interface for loading images and viewing solutions.
+Supports Polish and English via radio button toggle.
 """
 
 import os
@@ -22,21 +23,156 @@ from main import run_pipeline
 from solver import Solution
 
 
+# ── GUI string translations ────────────────────────────────────────────────
+
+_STRINGS = {
+    "pl": {
+        # Window
+        "window_title": "MathExerciseSolver — Rozwiązywanie zadań matematycznych",
+        # Toolbar buttons
+        "open_btn": "📂 Otwórz obraz",
+        "solve_btn": "🔢 Rozwiąż",
+        "pdf_btn": "📄 Eksportuj PDF",
+        # Language label
+        "lang_label": "Język:",
+        # Preview panel
+        "preview_title": "Obraz wejściowy",
+        "preview_empty": "Brak obrazu",
+        # Results panel
+        "results_title": "Rozwiązania",
+        # File dialogs
+        "open_title": "Wybierz obraz z zadaniami",
+        "filetype_images": "Obrazy",
+        "filetype_all": "Wszystkie pliki",
+        "save_pdf_title": "Zapisz PDF",
+        # Status messages
+        "status_ready": "Gotowy",
+        "status_loaded": "Załadowano: {name}",
+        "status_processing": "Przetwarzanie...",
+        "status_done": "Gotowo — {n} zadań",
+        "status_error": "Błąd",
+        "status_pdf_done": "PDF zapisany: {name}",
+        "status_pdf_gen": "Generowanie PDF...",
+        # Results display
+        "result_summary": "═══ Rozwiązano {solved}/{total} zadań ═══",
+        "result_problem": "Zadanie: {text}",
+        "result_answer": "✓ Odpowiedź: {text}",
+        # No results
+        "no_results": "Nie udało się rozpoznać zadań.",
+        "tips_title": "Wskazówki:",
+        "tip_1": "  • Upewnij się, że obraz jest wyraźny",
+        "tip_2": "  • Zadania powinny być numerowane (1., 2., itp.)",
+        "tip_3": "  • Spróbuj przyciąć obraz do samych zadań",
+        # Errors
+        "error_title": "Błąd",
+        "error_msg": "Wystąpił błąd:\n{text}",
+        # PDF success
+        "pdf_success_title": "Sukces",
+        "pdf_success_msg": "Plik PDF zapisany:\n{text}",
+        # Image error
+        "image_error": "Błąd: {text}",
+    },
+    "en": {
+        # Window
+        "window_title": "MathExerciseSolver — Math Problem Solver",
+        # Toolbar buttons
+        "open_btn": "📂 Open Image",
+        "solve_btn": "🔢 Solve",
+        "pdf_btn": "📄 Export PDF",
+        # Language label
+        "lang_label": "Language:",
+        # Preview panel
+        "preview_title": "Input Image",
+        "preview_empty": "No image loaded",
+        # Results panel
+        "results_title": "Solutions",
+        # File dialogs
+        "open_title": "Select an image with exercises",
+        "filetype_images": "Images",
+        "filetype_all": "All files",
+        "save_pdf_title": "Save PDF",
+        # Status messages
+        "status_ready": "Ready",
+        "status_loaded": "Loaded: {name}",
+        "status_processing": "Processing...",
+        "status_done": "Done — {n} exercise(s)",
+        "status_error": "Error",
+        "status_pdf_done": "PDF saved: {name}",
+        "status_pdf_gen": "Generating PDF...",
+        # Results display
+        "result_summary": "═══ Solved {solved}/{total} exercise(s) ═══",
+        "result_problem": "Problem: {text}",
+        "result_answer": "✓ Answer: {text}",
+        # No results
+        "no_results": "Could not recognize any exercises.",
+        "tips_title": "Tips:",
+        "tip_1": "  • Make sure the image is clear and well-lit",
+        "tip_2": "  • Exercises should be numbered (1., 2., etc.)",
+        "tip_3": "  • Try cropping the image to just the exercises",
+        # Errors
+        "error_title": "Error",
+        "error_msg": "An error occurred:\n{text}",
+        # PDF success
+        "pdf_success_title": "Success",
+        "pdf_success_msg": "PDF saved to:\n{text}",
+        # Image error
+        "image_error": "Error: {text}",
+    },
+}
+
+
+def _t(key: str, lang: str, **kwargs) -> str:
+    """Get a translated GUI string, formatted with kwargs."""
+    strings = _STRINGS.get(lang, _STRINGS["en"])
+    template = strings.get(key, key)
+    try:
+        return template.format(**kwargs)
+    except (KeyError, IndexError):
+        return template
+
+
 # ── Main GUI Class ─────────────────────────────────────────────────────────
 
 class MathSolverGUI:
     def __init__(self, root: tk.Tk):
         self.root = root
-        self.root.title(GUI_WINDOW_TITLE)
-        self.root.geometry(GUI_WINDOW_SIZE)
-        self.root.configure(bg=GUI_BG_COLOR)
-
         self.image_path = None
         self.solutions = []
         self.lang = tk.StringVar(value=DEFAULT_LANGUAGE)
-        self.status_var = tk.StringVar(value="Gotowy")
+        self.status_var = tk.StringVar()
+
+        # Trace language changes to update all labels
+        self.lang.trace_add("write", self._on_lang_change)
 
         self._build_ui()
+        self._update_labels()
+
+    def _on_lang_change(self, *_args):
+        """Called when the language radio button changes."""
+        self._update_labels()
+
+    def _update_labels(self):
+        """Update all GUI labels to match the current language."""
+        lang = self.lang.get()
+
+        self.root.title(_t("window_title", lang))
+        self.status_var.set(_t("status_ready", lang))
+
+        # Toolbar buttons
+        self.open_btn.config(text=_t("open_btn", lang))
+        self.solve_btn.config(text=_t("solve_btn", lang))
+        self.pdf_btn.config(text=_t("pdf_btn", lang))
+
+        # Language label
+        self.lang_label.config(text=_t("lang_label", lang))
+
+        # Panel titles
+        self.preview_title_label.config(text=_t("preview_title", lang))
+        self.results_title_label.config(text=_t("results_title", lang))
+
+        # Preview placeholder (only if no image loaded)
+        if not self.image_path:
+            self.preview_label.config(text=_t("preview_empty", lang))
 
     def _build_ui(self):
         """Build the GUI layout."""
@@ -45,20 +181,20 @@ class MathSolverGUI:
         toolbar.pack(fill=tk.X)
 
         self.open_btn = tk.Button(
-            toolbar, text="📂 Otwórz obraz", command=self._open_image,
+            toolbar, text=_t("open_btn", self.lang.get()), command=self._open_image,
             font=("Segoe UI", 11), padx=10, pady=3,
         )
         self.open_btn.pack(side=tk.LEFT, padx=5)
 
         self.solve_btn = tk.Button(
-            toolbar, text="🔢 Rozwiąż", command=self._solve,
+            toolbar, text=_t("solve_btn", self.lang.get()), command=self._solve,
             font=("Segoe UI", 11, "bold"), padx=10, pady=3,
             state=tk.DISABLED,
         )
         self.solve_btn.pack(side=tk.LEFT, padx=5)
 
         self.pdf_btn = tk.Button(
-            toolbar, text="📄 Eksportuj PDF", command=self._export_pdf,
+            toolbar, text=_t("pdf_btn", self.lang.get()), command=self._export_pdf,
             font=("Segoe UI", 11), padx=10, pady=3,
             state=tk.DISABLED,
         )
@@ -68,7 +204,11 @@ class MathSolverGUI:
         lang_frame = tk.Frame(toolbar, bg=GUI_BG_COLOR)
         lang_frame.pack(side=tk.RIGHT, padx=10)
 
-        tk.Label(lang_frame, text="Język:", bg=GUI_BG_COLOR, font=("Segoe UI", 10)).pack(side=tk.LEFT)
+        self.lang_label = tk.Label(
+            lang_frame, text=_t("lang_label", self.lang.get()),
+            bg=GUI_BG_COLOR, font=("Segoe UI", 10),
+        )
+        self.lang_label.pack(side=tk.LEFT)
         tk.Radiobutton(lang_frame, text="PL", variable=self.lang, value="pl",
                        bg=GUI_BG_COLOR, font=("Segoe UI", 10)).pack(side=tk.LEFT)
         tk.Radiobutton(lang_frame, text="EN", variable=self.lang, value="en",
@@ -83,19 +223,27 @@ class MathSolverGUI:
         left.pack(side=tk.LEFT, fill=tk.BOTH, padx=(0, 5))
         left.pack_propagate(False)
 
-        tk.Label(left, text="Obraz wejściowy", bg="#e0e0e0",
-                 font=("Segoe UI", 10, "bold")).pack(pady=5)
+        self.preview_title_label = tk.Label(
+            left, text=_t("preview_title", self.lang.get()),
+            bg="#e0e0e0", font=("Segoe UI", 10, "bold"),
+        )
+        self.preview_title_label.pack(pady=5)
 
-        self.preview_label = tk.Label(left, text="Brak obrazu", bg="#e0e0e0",
-                                       fg="#888", font=("Segoe UI", 12))
+        self.preview_label = tk.Label(
+            left, text=_t("preview_empty", self.lang.get()),
+            bg="#e0e0e0", fg="#888", font=("Segoe UI", 12),
+        )
         self.preview_label.pack(expand=True)
 
         # Right panel: solutions
         right = tk.Frame(content, bg=GUI_BG_COLOR)
         right.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(5, 0))
 
-        tk.Label(right, text="Rozwiązania", bg=GUI_BG_COLOR,
-                 font=("Segoe UI", 10, "bold")).pack(pady=5)
+        self.results_title_label = tk.Label(
+            right, text=_t("results_title", self.lang.get()),
+            bg=GUI_BG_COLOR, font=("Segoe UI", 10, "bold"),
+        )
+        self.results_title_label.pack(pady=5)
 
         self.results_text = scrolledtext.ScrolledText(
             right, wrap=tk.WORD, font=("Consolas", 11),
@@ -121,24 +269,26 @@ class MathSolverGUI:
 
     def _open_image(self):
         """Open a file dialog to select an image."""
+        lang = self.lang.get()
         filetypes = [
-            ("Obrazy", "*.png *.jpg *.jpeg *.bmp *.tiff *.tif *.webp"),
+            (_t("filetype_images", lang), "*.png *.jpg *.jpeg *.bmp *.tiff *.tif *.webp"),
             ("PNG", "*.png"),
             ("JPEG", "*.jpg *.jpeg"),
-            ("Wszystkie pliki", "*.*"),
+            (_t("filetype_all", lang), "*.*"),
         ]
         path = filedialog.askopenfilename(
-            title="Wybierz obraz z zadaniami",
+            title=_t("open_title", lang),
             filetypes=filetypes,
         )
         if path:
             self.image_path = path
             self._show_preview(path)
             self.solve_btn.config(state=tk.NORMAL)
-            self.status_var.set(f"Załadowano: {os.path.basename(path)}")
+            self.status_var.set(_t("status_loaded", lang, name=os.path.basename(path)))
 
     def _show_preview(self, path: str):
         """Display the image in the preview panel."""
+        lang = self.lang.get()
         try:
             img = Image.open(path)
             img.thumbnail((GUI_PREVIEW_MAX_WIDTH, GUI_PREVIEW_MAX_HEIGHT), Image.Resampling.LANCZOS)
@@ -147,16 +297,17 @@ class MathSolverGUI:
             self.preview_label.config(image=photo, text="")
             self.preview_label._photo = photo  # prevent GC
         except Exception as e:
-            self.preview_label.config(text=f"Błąd: {e}", image="")
+            self.preview_label.config(text=_t("image_error", lang, text=str(e)), image="")
 
     def _solve(self):
         """Run the solve pipeline in a background thread."""
         if not self.image_path:
             return
 
+        lang = self.lang.get()
         self.solve_btn.config(state=tk.DISABLED)
         self.pdf_btn.config(state=tk.DISABLED)
-        self.status_var.set("Przetwarzanie...")
+        self.status_var.set(_t("status_processing", lang))
 
         # Clear results
         self.results_text.config(state=tk.NORMAL)
@@ -183,27 +334,30 @@ class MathSolverGUI:
 
     def _display_solutions(self, solutions: list):
         """Display solutions in the results text widget."""
+        lang = self.lang.get()
         self.solutions = solutions
 
         self.results_text.config(state=tk.NORMAL)
         self.results_text.delete("1.0", tk.END)
 
         if not solutions:
-            self.results_text.insert(tk.END, "Nie udało się rozpoznać zadań.\n\n")
-            self.results_text.insert(tk.END, "Wskazówki:\n")
-            self.results_text.insert(tk.END, "  • Upewnij się, że obraz jest wyraźny\n")
-            self.results_text.insert(tk.END, "  • Zadania powinny być numerowane (1., 2., itp.)\n")
-            self.results_text.insert(tk.END, "  • Spróbuj przyciąć obraz do samych zadań\n")
+            self.results_text.insert(tk.END, _t("no_results", lang) + "\n\n")
+            self.results_text.insert(tk.END, _t("tips_title", lang) + "\n")
+            self.results_text.insert(tk.END, _t("tip_1", lang) + "\n")
+            self.results_text.insert(tk.END, _t("tip_2", lang) + "\n")
+            self.results_text.insert(tk.END, _t("tip_3", lang) + "\n")
         else:
             solved = sum(1 for s in solutions if s.is_valid)
-            self.results_text.insert(tk.END, f"═══ Rozwiązano {solved}/{len(solutions)} zadań ═══\n\n", "title")
+            summary = _t("result_summary", lang, solved=solved, total=len(solutions))
+            self.results_text.insert(tk.END, summary + "\n\n", "title")
 
             for i, sol in enumerate(solutions):
                 # Heading
                 self.results_text.insert(tk.END, f"#{i + 1}  [{sol.method}]\n", "heading")
 
                 # Problem
-                self.results_text.insert(tk.END, f"  Zadanie: {sol.problem}\n", "problem")
+                problem_line = _t("result_problem", lang, text=sol.problem)
+                self.results_text.insert(tk.END, f"  {problem_line}\n", "problem")
 
                 # Steps
                 for step in sol.steps:
@@ -212,7 +366,8 @@ class MathSolverGUI:
                         self.results_text.insert(tk.END, f"      {step.math}\n", "step")
 
                 # Answer
-                self.results_text.insert(tk.END, f"\n  ✓ Odpowiedź: {sol.answer}\n\n", "answer")
+                answer_line = _t("result_answer", lang, text=sol.answer)
+                self.results_text.insert(tk.END, f"\n  {answer_line}\n\n", "answer")
 
                 # Separator
                 if i < len(solutions) - 1:
@@ -224,28 +379,34 @@ class MathSolverGUI:
         self.solve_btn.config(state=tk.NORMAL)
         if solutions:
             self.pdf_btn.config(state=tk.NORMAL)
-        self.status_var.set(f"Gotowo — {len(solutions)} zadań")
+        self.status_var.set(_t("status_done", lang, n=len(solutions)))
 
     def _show_error(self, msg: str):
         """Display an error message."""
+        lang = self.lang.get()
         self.solve_btn.config(state=tk.NORMAL)
-        self.status_var.set("Błąd")
+        self.status_var.set(_t("status_error", lang))
 
         self.results_text.config(state=tk.NORMAL)
         self.results_text.delete("1.0", tk.END)
-        self.results_text.insert(tk.END, f"Błąd:\n{msg}\n", "error")
+        self.results_text.insert(tk.END, _t("error_title", lang) + f":\n{msg}\n", "error")
         self.results_text.config(state=tk.DISABLED)
 
-        messagebox.showerror("Błąd", f"Wystąpił błąd:\n{msg}")
+        messagebox.showerror(
+            _t("error_title", lang),
+            _t("error_msg", lang, text=msg),
+        )
 
     def _export_pdf(self):
         """Export solutions to a handwriting-style PDF."""
         if not self.solutions:
             return
 
+        lang = self.lang.get()
+
         # Ask for save location
         path = filedialog.asksaveasfilename(
-            title="Zapisz PDF",
+            title=_t("save_pdf_title", lang),
             defaultextension=".pdf",
             filetypes=[("PDF", "*.pdf")],
             initialdir=OUTPUT_DIR,
@@ -254,7 +415,7 @@ class MathSolverGUI:
         if not path:
             return
 
-        self.status_var.set("Generowanie PDF...")
+        self.status_var.set(_t("status_pdf_gen", lang))
         self.pdf_btn.config(state=tk.DISABLED)
 
         def _export_thread():
@@ -270,9 +431,13 @@ class MathSolverGUI:
 
     def _pdf_done(self, path: str):
         """Called when PDF export completes."""
+        lang = self.lang.get()
         self.pdf_btn.config(state=tk.NORMAL)
-        self.status_var.set(f"PDF zapisany: {os.path.basename(path)}")
-        messagebox.showinfo("Sukces", f"Plik PDF zapisany:\n{path}")
+        self.status_var.set(_t("status_pdf_done", lang, name=os.path.basename(path)))
+        messagebox.showinfo(
+            _t("pdf_success_title", lang),
+            _t("pdf_success_msg", lang, text=path),
+        )
 
 
 # ── Launch ─────────────────────────────────────────────────────────────────
