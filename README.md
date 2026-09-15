@@ -11,7 +11,7 @@ Built for **Polish grades 7-8** (ages 13–15), but works for any basic math.
 
 ![Python](https://img.shields.io/badge/Python-3.10+-blue?logo=python)
 ![Platform](https://img.shields.io/badge/Platform-Windows-green?logo=windows)
-![License](https://img.shields.io/badge/License-MIT-yellow)
+![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)
 
 ---
 
@@ -210,4 +210,4 @@ All settings are in `config.py`. Key options:
 
 ## License
 
-MIT
+Apache License 2.0
