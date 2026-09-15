@@ -1,0 +1,64 @@
+# ── Python ─────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+dist/
+build/
+eggs/
+*.whl
+
+# ── Virtual environment ────────────────────────────────────────────────────
+.venv/
+venv/
+ENV/
+env/
+
+# ── IDE / Editor ───────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.settings/
+
+# ── OS ─────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+Desktop.ini
+ehthumbs.db
+
+# ── Output (generated files) ───────────────────────────────────────────────
+output/
+*.pdf
+
+# ── Crops (generated during processing) ───────────────────────────────────
+output/crops/
+
+# ── Installer temp files ───────────────────────────────────────────────────
+*.exe
+*.msi
+
+# ── Trained models / large downloads ───────────────────────────────────────
+*.pkl
+*.h5
+*.pt
+*.pth
+*.onnx
+models/
+
+# ── Logs ───────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── Testing ────────────────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# ── Tesseract (if user installs locally) ───────────────────────────────────
+tessdata/
