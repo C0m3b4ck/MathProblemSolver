@@ -1,0 +1,1 @@
+commit into release v1.2, allow user to manually override the starting problem so that program can re-calculate. However, as step 1, research potential OCR for math

@@ -163,7 +163,8 @@ def ocr_exercise(
     Full OCR pipeline for a single exercise region.
 
     Runs both Tesseract (for Polish text) and Pix2Tex (for math expressions),
-    then merges the results.
+    then merges the results. Also detects fraction bars from the image as a
+    fallback when Pix2Tex doesn't recognize fractions.
 
     Args:
         img: Image region (BGR or grayscale).
@@ -175,6 +176,7 @@ def ocr_exercise(
           - math_latex: LaTeX math expressions (Pix2Tex)
           - words: word-level data from Tesseract
           - merged: merged/structured result
+          - detected_fractions: list of detected fraction dicts (from image bars)
     """
     # Tesseract for general text
     text = ocr_with_tesseract(img)
@@ -185,6 +187,34 @@ def ocr_exercise(
     if use_latex:
         math_latex = ocr_with_latex(img)
 
+    # Detect fraction bars from the image (fallback for when Pix2Tex misses them)
+    detected_fractions = []
+    try:
+        from preprocessing import detect_fractions_in_image
+        detected_fractions = detect_fractions_in_image(img)
+    except Exception as e:
+        print(f"  [OCR] Fraction bar detection failed: {e}")
+
+    # If Pix2Tex didn't produce LaTeX with \frac, but we detected fraction bars,
+    # construct LaTeX from the detected fractions
+    if detected_fractions and (not math_latex or "\\frac" not in math_latex):
+        frac_expressions = []
+        for frac in detected_fractions:
+            num = frac["numerator"]
+            den = frac["denominator"]
+            # Try to parse as a fraction expression
+            try:
+                frac_expressions.append(f"\\frac{{{num}}}{{{den}}}")
+            except Exception:
+                pass
+        if frac_expressions:
+            # Build a combined LaTeX expression from detected fractions
+            if math_latex:
+                math_latex += " + ".join(frac_expressions)
+            else:
+                math_latex = " + ".join(frac_expressions)
+            print(f"  [OCR] Constructed LaTeX from {len(frac_expressions)} detected fraction bar(s)")
+
     # Merge results
     merged = _merge_ocr_results(text, math_latex)
 
@@ -193,6 +223,7 @@ def ocr_exercise(
         "math_latex": math_latex,
         "words": word_data.get("words", []),
         "merged": merged,
+        "detected_fractions": detected_fractions,
     }
 
 

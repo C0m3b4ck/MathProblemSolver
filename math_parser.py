@@ -57,6 +57,31 @@ def _latex_to_text(latex_str: str) -> str:
         if s == prev:
             break
 
+    # Handle \dfrac{num}{den} (display fractions) the same way
+    for _ in range(10):
+        prev = s
+        s = re.sub(
+            r"\\dfrac\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}",
+            r"(\1)/(\2)",
+            s,
+        )
+        if s == prev:
+            break
+
+    # Handle \cfrac{num}{den} (continued fractions) the same way
+    for _ in range(10):
+        prev = s
+        s = re.sub(
+            r"\\cfrac\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}",
+            r"(\1)/(\2)",
+            s,
+        )
+        if s == prev:
+            break
+
+    # Handle \over notation: {num}\over{den} → (num)/(den)
+    s = re.sub(r"\{([^{}]+)\}\\over\{([^{}]+)\}", r"(\1)/(\2)", s)
+
     # \sqrt{a} → sqrt(a)
     s = re.sub(r"\\sqrt\{([^{}]+)\}", r"sqrt(\1)", s)
 
@@ -147,6 +172,17 @@ def clean_ocr_text(text: str) -> str:
     result = result.replace("_", "")
     # Normalize uppercase X → x (OCR often outputs uppercase, solver expects lowercase)
     result = re.sub(r"(?<![a-zA-Z])X(?![a-zA-Z])", "x", result)
+    # Normalize Unicode fraction characters to parenthesized fractions
+    # e.g. ½ → (1/2), ⅓ → (1/3), etc. — ensures they parse as fractions
+    unicode_fracs = {
+        "½": "(1/2)", "⅓": "(1/3)", "⅔": "(2/3)",
+        "¼": "(1/4)", "¾": "(3/4)",
+        "⅕": "(1/5)", "⅖": "(2/5)", "⅗": "(3/5)", "⅘": "(4/5)",
+        "⅙": "(1/6)", "⅚": "(5/6)",
+        "⅛": "(1/8)", "⅜": "(3/8)", "⅝": "(5/8)", "⅞": "(7/8)",
+    }
+    for frac_char, frac_text in unicode_fracs.items():
+        result = result.replace(frac_char, frac_text)
     # Collapse multiple spaces
     result = re.sub(r"\s+", " ", result).strip()
     return result
@@ -191,35 +227,39 @@ def parse_math_input(raw: str) -> Optional[object]:
     Try multiple strategies to parse OCR output into SymPy.
 
     Strategy order:
-      1. Plain-text parse (if it looks like plain math)
-      2. LaTeX parse via sympy
-      3. LaTeX → plain text conversion, then parse
-      4. Return None if all fail
+      1. LaTeX parse via sympy (best for \\frac, \\sqrt, etc.)
+      2. LaTeX → plain text conversion, then parse
+      3. Plain-text parse (handles "1/3*x - 2 = x + 2" etc.)
+      4. Extract math from mixed text+math lines
+      5. Return None if all fail
     """
     cleaned = clean_ocr_text(raw)
 
     # Skip if no math content at all
-    if not re.search(r"[\d=+\-*/^√²³x]", cleaned):
+    # Allow digits, operators, x, or a single variable letter (e.g. "l", "a")
+    if not re.search(r"[\d=+\-*/^√²³x]", cleaned) and not re.fullmatch(r"[a-zA-Z]", cleaned.strip()):
         return None
 
-    # Try plain text first (handles "1/3*x - 2 = x + 2" etc.)
-    result = text_to_sympy(cleaned)
-    if result is not None:
-        return result
+    # Strategy 1: Try LaTeX parse first (best for \frac{1}{2}+\frac{1}{3})
+    if "\\" in raw:
+        result = latex_to_sympy(raw)
+        if result is not None:
+            return result
 
-    # Try LaTeX parse
-    result = latex_to_sympy(raw)
-    if result is not None:
-        return result
-
-    # Convert LaTeX to plain text and try again
+    # Strategy 2: Convert LaTeX to plain text and parse
+    # This handles \frac{1}{2}+1 → (1)/(2)+1 → 1/2 + 1
     plain = _latex_to_text(raw)
     if plain != cleaned:
         result = text_to_sympy(plain)
         if result is not None:
             return result
 
-    # Try extracting math from mixed text+math lines
+    # Strategy 3: Plain text parse (handles "1/2+1/3" etc.)
+    result = text_to_sympy(cleaned)
+    if result is not None:
+        return result
+
+    # Strategy 4: Try extracting math from mixed text+math lines
     # e.g., "1. Oblicz: 2 + 3 * 4" → try "2 + 3 * 4"
     math_part = _extract_math_from_text(raw)
     if math_part:
@@ -227,7 +267,7 @@ def parse_math_input(raw: str) -> Optional[object]:
         if result is not None:
             return result
 
-    # Try stripping surrounding $ signs
+    # Strategy 5: Try stripping surrounding $ signs
     stripped = cleaned.strip("$").strip("\\(").strip("\\)")
     if stripped != cleaned:
         result = text_to_sympy(stripped)
@@ -348,7 +388,10 @@ def extract_problem_context(text: str) -> dict:
     lower = text.lower()
     result["has_percentage"] = any(w in lower for w in ["%", "procent", "percent"])
     result["has_equation"] = "=" in text or any(w in lower for w in ["równanie", "equation", "rozwiąż", "solve"])
-    result["has_fraction"] = any(w in text for w in ["/", "frac", "⅓", "½", "¼", "¾", "⅔"])
+    result["has_fraction"] = any(w in text for w in [
+        "/", "frac", "dfrac", "cfrac", "over",
+        "½", "⅓", "⅔", "¼", "¾", "⅕", "⅖", "⅗", "⅘", "⅙", "⅚", "⅛", "⅜", "⅝", "⅞",
+    ])
     result["has_power"] = any(w in text for w in ["²", "³", "^", "**", "potęg", "power"])
     result["has_root"] = any(w in text for w in ["√", "pierwiast", "root", "sqrt"])
     result["has_geometry"] = any(w in lower for w in [
@@ -371,6 +414,9 @@ def _split_latex_expressions(latex_str: str) -> List[str]:
     Split a LaTeX string that contains multiple expressions into individual parts.
     Handles \\begin{array}, \\, &, exercise labels, etc.
     Preserves \\frac, \\sqrt etc. for _latex_to_text to convert later.
+
+    IMPORTANT: We must not split inside \\frac{}{} or \\sqrt{} — only on
+    \\quad, \\qquad, \\\\ (double backslash), or & separators.
     """
     if not latex_str:
         return []
@@ -385,11 +431,14 @@ def _split_latex_expressions(latex_str: str) -> List[str]:
     parts = re.split(r"\\\\+|&", result)
 
     # Further split each part on \quad, \qquad, etc.
+    # But NOT inside \frac{}{} or \sqrt{} — only on explicit separators.
     expanded = []
     for segment in parts:
         segment = segment.strip()
         if not segment:
             continue
+
+        # Split on \quad, \qquad separators (these are explicit breaks between exercises)
         sub_parts = re.split(r"\\q?quad\s*|\\;\s*|\\,\s*|\\!\s*", segment)
         expanded.extend(sub_parts)
 
@@ -400,20 +449,25 @@ def _split_latex_expressions(latex_str: str) -> List[str]:
         if not expr or len(expr) < 2:
             continue
 
-        # Extract letter label BEFORE stripping it (for sorting later)
-        label_m = re.match(r"^([a-f])\s*[)\.~]\s*", expr)
-        label = label_m.group(1) if label_m else None
-
         # Strip \mathrm{...} with proper brace matching (preserves nested \frac)
         expr = _strip_cmd_wrappers(expr, "mathrm")
 
-        # NOTE: We do NOT strip outer {{...}} braces here.
-        # Let _latex_to_text handle all brace cleanup — it converts \frac{}{}
-        # first (removing those braces), then strips all remaining stray braces.
-        # Stripping braces here risks removing the closing } of \frac{4}{7} etc.
+        # NOTE: We do NOT strip outer {{...}} braces here — that would corrupt
+        # \frac{}{} expressions by removing their closing brace.
 
-        # Strip exercise labels: "a) ", "b~", "i~", etc. (start only)
-        expr = re.sub(r"^[a-zA-Z]\s*[)\.~]\s*", "", expr)
+        # Extract letter label — scan through optional leading braces { {{
+        # Pix2Tex wraps expressions in {{...}}, so label "a~" may be inside {{a~...}}
+        label = None
+        label_m = re.match(
+            r"^\{*\s*([a-f])\s*[)\.~]\s*",
+            expr,
+        )
+        if label_m:
+            label = label_m.group(1)
+            # Advance expr past the label prefix (including any leading braces)
+            expr = expr[label_m.end():]
+
+        # Strip numeric exercise labels: "1) ", "2a)", etc. (start only)
         expr = re.sub(r"^\d{1,2}[a-z]?[\.\)]\s*", "", expr)
 
         # Remove ~ (non-breaking space)
@@ -425,7 +479,7 @@ def _split_latex_expressions(latex_str: str) -> List[str]:
         # Final cleanup: strip any leading non-math text before the first
         # digit, variable, minus, or \frac. This removes leftover labels
         # like "a i" or "b" that weren't caught by the label regex.
-        m = re.search(r"(?:(?:[\-]?\d|[\-\(]|\\frac|\\sqrt|[a-zA-Z]\s*[=+\-*/^]))", expr)
+        m = re.search(r"(?:(?:[\-]?\d|[\-\(]|\\frac|\\dfrac|\\cfrac|\\sqrt|[a-zA-Z]\s*[=+\-*/^]))", expr)
         if m:
             expr = expr[m.start():]
 
@@ -495,6 +549,7 @@ def parse_exercise(raw_text: str, math_ocr_text: Optional[str] = None) -> dict:
 
     # Also split Tesseract text on newlines AND exercise labels
     # Preserve labels so we can sort by them later
+    # Handles: "a) expr", "a. expr", "a expr", "1a) expr", etc.
     text_parts = []
     text_labels = []  # parallel list of letter labels (or None)
     if raw_text:
@@ -504,39 +559,74 @@ def parse_exercise(raw_text: str, math_ocr_text: Optional[str] = None) -> dict:
                 continue
             # Split on exercise labels: a), b), c) etc.
             # Split when label is at start of line OR preceded by whitespace.
-            # Only match labels a-f (typical exercise labels) to avoid breaking
-            # things like "(3-x)" where 'x)' is not a label.
+            # Matches: a) , a. , a  (letter + separator + space)
+            # Only match labels a-f to avoid false positives.
             label_parts = re.split(
-                r"(?:^|(?<=\s))(?=[a-f]\)\s)",
+                r"(?:^|(?<=\s))(?=[a-f][\).]\s)",
                 line,
             )
             for lp in label_parts:
-                # Extract the letter label before stripping it
-                label_match = re.match(r"^([a-f])\)\s*", lp.strip())
-                label = label_match.group(1) if label_match else None
-                lp_clean = re.sub(r"^[a-z]\)\s*", "", lp.strip())
+                lp_stripped = lp.strip()
+                if not lp_stripped:
+                    continue
+                # Extract label: try "a)", "a.", then "a " (letter followed by space/digit)
+                label_match = re.match(
+                    r"^([a-f])\)\s*|^([a-f])\.\s*|^([a-f])(?=\s|\d)",
+                    lp_stripped,
+                )
+                if label_match:
+                    label = label_match.group(1) or label_match.group(2) or label_match.group(3)
+                    # Remove the label prefix
+                    lp_clean = re.sub(r"^[a-f][\).]\s*", "", lp_stripped)
+                    lp_clean = re.sub(r"^[a-f]\s+", "", lp_clean)  # "a 1+2" → "1+2"
+                else:
+                    label = None
+                    lp_clean = lp_stripped
+
                 if lp_clean:
                     text_parts.append(lp_clean)
                     text_labels.append(label)
 
     # Combine: math parts first (higher quality for equations), then text parts
-    candidates = math_parts + text_parts
+    # math_parts have labels as "a) {expr}" prefixes (from _split_latex_expressions)
+    # text_parts have labels already stripped (stored in text_labels)
+    candidates = []
+    candidate_labels = []  # parallel list of labels (or None)
+
+    # Math parts: labels are prefixed in the string (e.g., "a) \\frac{1}{2}x...")
+    for mp in math_parts:
+        candidates.append(mp)
+        candidate_labels.append(None)  # label will be extracted from the prefix
+
+    # Text parts: labels are in the parallel text_labels list (already stripped)
+    for tp, tl in zip(text_parts, text_labels):
+        candidates.append(tp)
+        candidate_labels.append(tl)
 
     expressions = []
+    expression_labels = []  # parallel list of labels for expressions
     equations = []
     equation_labels = []  # parallel list of labels for equations
     unparsed = []
 
-    for line in candidates:
+    for idx, line in enumerate(candidates):
         line = line.strip()
         if not line or len(line) < 2:
             continue
 
-        # Extract and strip letter label prefix (e.g., "a) 3x-2=x+2" → label="a")
-        label_prefix = re.match(r"^([a-f])\)\s*", line)
-        label = label_prefix.group(1) if label_prefix else None
+        # Extract letter label:
+        # - For math parts: extract from prefix "a) expr", "a. expr", "a~expr", "a expr"
+        # - For text parts: use the pre-extracted label from candidate_labels
+        label_prefix = re.match(
+            r"^([a-f])\)\s*|^([a-f])\.\s*|^([a-f])\~\s*|^([a-f])\s+",
+            line,
+        )
         if label_prefix:
+            label = (label_prefix.group(1) or label_prefix.group(2)
+                     or label_prefix.group(3) or label_prefix.group(4))
             line = line[label_prefix.end():]
+        else:
+            label = candidate_labels[idx]  # already extracted, or None
 
         # Skip pure text lines (no digits or math symbols)
         if not re.search(r"[\d=+\-*/^√²³]", line):
@@ -557,44 +647,68 @@ def parse_exercise(raw_text: str, math_ocr_text: Optional[str] = None) -> dict:
         expr = parse_math_input(line)
         if expr is not None:
             expressions.append(expr)
+            expression_labels.append(label)
         else:
             unparsed.append(line)
 
-    # Deduplicate equations (same lhs-rhs pair)
-    seen_eqs = set()
+    # ── Deduplicate equations ────────────────────────────────────────────
+    # Two-pass strategy:
+    #   1. Label-based dedup: keep ONE equation per letter label
+    #      (prefer Pix2Tex math_parts over Tesseract text_parts).
+    #   2. Content-based dedup: catch duplicates among UNLABELED equations
+    #      (e.g. single-part exercises where OCR returns the same
+    #      equation multiple times without a letter prefix).
+    seen_labels = set()
+    seen_unlabeled_content = set()
     unique_equations = []
-    unique_labels = []
+    unique_eq_labels = []
     for i, eq in enumerate(equations):
-        lhs, op, rhs = eq
-        key = (str(lhs), op, str(rhs))
-        if key not in seen_eqs:
-            seen_eqs.add(key)
+        lbl = equation_labels[i] if i < len(equation_labels) else None
+        # Labeled equations: dedup by label only (a) and b) can have
+        # the same content — that's a legitimate multi-part exercise).
+        if lbl:
+            if lbl in seen_labels:
+                continue
+            seen_labels.add(lbl)
             unique_equations.append(eq)
-            unique_labels.append(equation_labels[i] if i < len(equation_labels) else None)
+            unique_eq_labels.append(lbl)
+        else:
+            # Unlabeled equations: dedup by content
+            content_key = (str(eq[0]), eq[1], str(eq[2]))
+            if content_key in seen_unlabeled_content:
+                continue
+            seen_unlabeled_content.add(content_key)
+            unique_equations.append(eq)
+            unique_eq_labels.append(lbl)
     equations = unique_equations
-    equation_labels = unique_labels
+    equation_labels = unique_eq_labels
 
     # Flag equations with garbled OCR characters (§, ©, ¶, etc.)
     # These are Tesseract artifacts when it can't read fractions properly
     GARLED_CHARS = set("§©¶†‡※")
     clean_equations = []
-    clean_labels = []
+    clean_eq_labels = []
     for eq, label in zip(equations, equation_labels):
         lhs_str, op, rhs_str = str(eq[0]), eq[1], str(eq[2])
         if any(c in lhs_str or c in rhs_str for c in GARLED_CHARS):
             unparsed.append(f"{lhs_str} {op} {rhs_str} (OCR garbled)")
         else:
             clean_equations.append(eq)
-            clean_labels.append(label)
+            clean_eq_labels.append(label)
     equations = clean_equations
-    equation_labels = clean_labels
+    equation_labels = clean_eq_labels
 
-    # Sort equations by letter label (a < b < c < ...)
-    # Equations without a label go to the end
+    # ── Sort equations by letter label (a < b < c < ...) ─────────────────
     labeled = [(lbl, eq) for lbl, eq in zip(equation_labels, equations) if lbl]
-    unlabeled = [eq for lbl, eq in zip(equation_labels, equations) if not lbl]
+    unlabeled_eqs = [eq for lbl, eq in zip(equation_labels, equations) if not lbl]
     labeled.sort(key=lambda x: x[0])
-    equations = [eq for _, eq in labeled] + unlabeled
+    equations = [eq for _, eq in labeled] + unlabeled_eqs
+
+    # ── Sort expressions by letter label (a < b < c < ...) ───────────────
+    labeled_exprs = [(lbl, expr) for lbl, expr in zip(expression_labels, expressions) if lbl]
+    unlabeled_exprs = [expr for lbl, expr in zip(expression_labels, expressions) if not lbl]
+    labeled_exprs.sort(key=lambda x: x[0])
+    expressions = [expr for _, expr in labeled_exprs] + unlabeled_exprs
 
     return {
         "raw": raw_text,

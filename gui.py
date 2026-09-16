@@ -453,16 +453,18 @@ class MathSolverGUI:
             self.preview_label.config(text=_t("preview_empty", lang))
 
     def _update_system_stats(self):
-        """Update CPU and RAM usage labels every 2 seconds."""
+        """Update process CPU and RAM usage labels every 2 seconds."""
         try:
             import psutil
-            cpu_pct = psutil.cpu_percent(interval=0)
-            mem = psutil.virtual_memory()
-            ram_pct = mem.percent
-            ram_mb = int(mem.used / (1024 * 1024))
+            proc = psutil.Process()
+            # CPU: use process CPU times for delta-based percentage
+            cpu_pct = proc.cpu_percent(interval=0)
+            # RAM: process-specific memory usage
+            mem_info = proc.memory_info()
+            ram_mb = int(mem_info.rss / (1024 * 1024))
             lang = self.lang.get()
-            self.cpu_label.config(text=_t("sys_cpu", lang, pct=int(cpu_pct)))
-            self.ram_label.config(text=_t("sys_ram", lang, pct=int(ram_pct), mb=ram_mb))
+            self.cpu_label.config(text=_t("sys_cpu", lang, pct=f"{cpu_pct:.0f}"))
+            self.ram_label.config(text=_t("sys_ram", lang, pct="--", mb=ram_mb))
         except Exception as e:
             print(f"[SystemStats] Error: {e}")
         self.root.after(2000, self._update_system_stats)
@@ -649,7 +651,7 @@ class MathSolverGUI:
         self.ram_label.pack(side=tk.RIGHT, padx=10)
 
         tk.Label(status_bar, textvariable=self.status_var, bg="#d0d0d0",
-                 font=("Segoe UI", 9), anchor=tk.W).pack(fill=tk.X, side=tk.LEFT, padx=10)
+                 font=("Segoe UI", 9), anchor=tk.W).pack(side=tk.LEFT, padx=10)
 
         # Start periodic system stats update (delay first call so window is rendered)
         self.root.after(500, self._update_system_stats)

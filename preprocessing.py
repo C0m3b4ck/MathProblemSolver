@@ -322,3 +322,168 @@ def display_regions(
             cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2,
         )
     return preview
+
+
+# ── Fraction bar detection ──────────────────────────────────────────────────
+
+def detect_fraction_bars(gray: np.ndarray, min_bar_width: int = 15) -> List[dict]:
+    """
+    Detect horizontal bars in an image that likely represent fraction lines.
+
+    Returns a list of dicts, each with:
+      - bar_y: vertical center of the bar
+      - bar_x: horizontal center of the bar
+      - bar_w: width of the bar
+      - y_top: top of the bar region (above the bar, for numerator)
+      - y_bot: bottom of the bar region (below the bar, for denominator)
+      - region: (x, y, w, h) bounding box of the full fraction region
+    """
+    if len(gray.shape) == 3:
+        gray = cv2.cvtColor(gray, cv2.COLOR_BGR2GRAY)
+
+    h, w = gray.shape
+
+    # Binarize: dark pixels (ink) become 255
+    _, binary = cv2.threshold(gray, 128, 255, cv2.THRESH_BINARY_INV)
+
+    # Detect horizontal lines using morphological operations
+    # Use a smaller kernel to detect shorter fraction bars
+    # Fraction bars can be as short as 10-15px in handwritten text
+    kernel_len = max(min_bar_width, min(w // 30, 25))
+    horizontal_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kernel_len, 1))
+    horizontal = cv2.morphologyEx(binary, cv2.MORPH_OPEN, horizontal_kernel, iterations=1)
+
+    # Find contours of horizontal lines
+    contours, _ = cv2.findContours(horizontal, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    bars = []
+    for contour in contours:
+        x, y, cw, ch = cv2.boundingRect(contour)
+
+        # Filter: fraction bars are thin (height < 5px) and have reasonable width
+        if ch > 6:
+            continue  # too thick — likely not a fraction bar
+        if cw < min_bar_width:
+            continue  # too short — likely noise
+        # Filter: fraction bars are typically in the middle portion of the image
+        # (not at the very top or bottom edge)
+        if y < 3 or y + ch > h - 3:
+            continue
+
+        bar_y = y + ch // 2
+        bar_x = x + cw // 2
+
+        # Fraction region: the bar + space above (numerator) + space below (denominator)
+        fraction_height = min(h // 4, 60)  # how much to look above/below
+        y_top = max(0, bar_y - fraction_height)
+        y_bot = min(h, bar_y + fraction_height)
+
+        bars.append({
+            "bar_y": bar_y,
+            "bar_x": bar_x,
+            "bar_w": cw,
+            "y_top": y_top,
+            "y_bot": y_bot,
+            "region": (x, y_top, cw, y_bot - y_top),
+        })
+
+    # Sort by vertical position (top to bottom)
+    bars.sort(key=lambda b: b["bar_y"])
+
+    # Merge bars that are very close together (same fraction bar, multiple detections)
+    merged_bars = []
+    for bar in bars:
+        if merged_bars and abs(bar["bar_y"] - merged_bars[-1]["bar_y"]) < 8:
+            # Same bar region — keep the wider one
+            if bar["bar_w"] > merged_bars[-1]["bar_w"]:
+                merged_bars[-1] = bar
+        else:
+            merged_bars.append(bar)
+
+    return merged_bars
+
+
+def extract_fraction_from_image(
+    gray: np.ndarray,
+    bar_info: dict,
+) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Extract the numerator and denominator from an image region around a fraction bar.
+
+    Uses Tesseract to OCR the region above and below the bar separately.
+
+    Returns (numerator_text, denominator_text) or (None, None) on failure.
+    """
+    from ocr_engine import ocr_with_tesseract
+
+    h, w = gray.shape[:2]
+    bar_y = bar_info["bar_y"]
+    bar_x = bar_info["bar_x"]
+    bar_w = bar_info["bar_w"]
+
+    # Extract numerator region (above the bar)
+    pad_x = max(5, bar_w // 4)
+    x1 = max(0, bar_x - bar_w // 2 - pad_x)
+    x2 = min(w, bar_x + bar_w // 2 + pad_x)
+    y1 = max(0, bar_y - (bar_y - bar_info["y_top"]))
+    y2 = max(0, bar_y - 2)  # just above the bar
+
+    if y2 <= y1:
+        return None, None
+
+    num_region = gray[y1:y2, x1:x2]
+    if num_region.size == 0:
+        return None, None
+
+    # Extract denominator region (below the bar)
+    y3 = min(h, bar_y + 3)  # just below the bar
+    y4 = min(h, bar_y + (bar_info["y_bot"] - bar_y))
+
+    if y4 <= y3:
+        return None, None
+
+    den_region = gray[y3:y4, x1:x2]
+    if den_region.size == 0:
+        return None, None
+
+    # OCR each region
+    num_text = ocr_with_tesseract(num_region).strip()
+    den_text = ocr_with_tesseract(den_region).strip()
+
+    # Clean: keep only digits and basic math
+    num_text = re.sub(r"[^\d+\-*/.]", "", num_text).strip()
+    den_text = re.sub(r"[^\d+\-*/.]", "", den_text).strip()
+
+    if num_text and den_text:
+        return num_text, den_text
+
+    return None, None
+
+
+def detect_fractions_in_image(
+    img: np.ndarray,
+) -> List[dict]:
+    """
+    Detect fraction bars in an image and extract the fraction components.
+
+    Returns list of dicts with keys:
+      - numerator: str (OCR'd numerator)
+      - denominator: str (OCR'd denominator)
+      - y_center: int (vertical position for sorting)
+      - region: tuple (x, y, w, h)
+    """
+    gray = to_grayscale(img)
+    bars = detect_fraction_bars(gray)
+
+    fractions = []
+    for bar in bars:
+        num, den = extract_fraction_from_image(gray, bar)
+        if num and den:
+            fractions.append({
+                "numerator": num,
+                "denominator": den,
+                "y_center": bar["bar_y"],
+                "region": bar["region"],
+            })
+
+    return fractions
