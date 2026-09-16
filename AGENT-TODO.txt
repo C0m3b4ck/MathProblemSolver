@@ -1,0 +1,1 @@
+1. still does not show CPU and RAM (shows ---) 2. the program has massive problems in detecting fractions with a bar 3. when problems are labelled with letters (like "a)"), sort them by order

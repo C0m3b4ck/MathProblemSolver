@@ -456,20 +456,15 @@ class MathSolverGUI:
         """Update CPU and RAM usage labels every 2 seconds."""
         try:
             import psutil
-            if not hasattr(self, '_psutil_initialized'):
-                # First call with interval to get a real CPU reading
-                self._psutil_initialized = True
-                cpu_pct = psutil.cpu_percent(interval=0.2)
-            else:
-                cpu_pct = psutil.cpu_percent(interval=0)
+            cpu_pct = psutil.cpu_percent(interval=0)
             mem = psutil.virtual_memory()
             ram_pct = mem.percent
             ram_mb = int(mem.used / (1024 * 1024))
             lang = self.lang.get()
             self.cpu_label.config(text=_t("sys_cpu", lang, pct=int(cpu_pct)))
             self.ram_label.config(text=_t("sys_ram", lang, pct=int(ram_pct), mb=ram_mb))
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[SystemStats] Error: {e}")
         self.root.after(2000, self._update_system_stats)
 
     def _build_ui(self):
@@ -656,8 +651,8 @@ class MathSolverGUI:
         tk.Label(status_bar, textvariable=self.status_var, bg="#d0d0d0",
                  font=("Segoe UI", 9), anchor=tk.W).pack(fill=tk.X, side=tk.LEFT, padx=10)
 
-        # Start periodic system stats update
-        self._update_system_stats()
+        # Start periodic system stats update (delay first call so window is rendered)
+        self.root.after(500, self._update_system_stats)
 
     # ── Actions ────────────────────────────────────────────────────────
 

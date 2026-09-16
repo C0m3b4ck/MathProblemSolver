@@ -162,14 +162,14 @@ def _add_char_variation(
 import re as _re
 
 # Pattern: match fractions like 12/5, x/3, 2*x/7, -3/4, 12 / -2, etc.
-# Allows optional spaces around the / operator
+# Allows optional spaces around the / operator.
 _FRACTION_RE = _re.compile(
-    r'(?<![a-zA-Z/\d])'         # not preceded by letter, slash, or digit
-    r'(-?)'                      # optional negative sign
-    r'([\d\w\+\-\*\(\)]+?)'     # numerator: digits, x, operators, parens
-    r'\s*/\s*'                   # slash with optional spaces
-    r'([\d\w\+\-\*\(\)]+?)'     # denominator: same
-    r'(?![a-zA-Z/\d])'          # not followed by letter, slash, or digit
+    r'(?<![a-zA-Z0-9/])'       # not preceded by letter, digit, or slash
+    r'(-?)'                     # optional negative sign
+    r'([0-9]+|[a-zA-Z])'       # numerator: number or single variable
+    r'\s*/\s*'                  # slash with optional spaces
+    r'([0-9]+|[a-zA-Z])'       # denominator: number or single variable
+    r'(?![a-zA-Z0-9/])'        # not followed by letter, digit, or slash
 )
 
 

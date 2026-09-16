@@ -400,6 +400,10 @@ def _split_latex_expressions(latex_str: str) -> List[str]:
         if not expr or len(expr) < 2:
             continue
 
+        # Extract letter label BEFORE stripping it (for sorting later)
+        label_m = re.match(r"^([a-f])\s*[)\.~]\s*", expr)
+        label = label_m.group(1) if label_m else None
+
         # Strip \mathrm{...} with proper brace matching (preserves nested \frac)
         expr = _strip_cmd_wrappers(expr, "mathrm")
 
@@ -429,6 +433,9 @@ def _split_latex_expressions(latex_str: str) -> List[str]:
         if not re.search(r"[\d=+\-*/^xX]", expr):
             continue
         if expr:
+            # Prepend label so parse_exercise can sort by it
+            if label:
+                expr = f"{label}) {expr}"
             cleaned.append(expr)
 
     return cleaned if cleaned else [latex_str]
@@ -474,7 +481,7 @@ def parse_exercise(raw_text: str, math_ocr_text: Optional[str] = None) -> dict:
           - raw: original text
           - context: extracted context info
           - expressions: list of parsed SymPy expressions
-          - equations: list of (lhs, op, rhs) tuples
+          - equations: list of (lhs, op, rhs) tuples (sorted by letter label)
           - unparsed: list of strings that failed to parse
     """
     context = extract_problem_context(raw_text)
@@ -487,7 +494,9 @@ def parse_exercise(raw_text: str, math_ocr_text: Optional[str] = None) -> dict:
         math_parts = _split_latex_expressions(math_ocr_text)
 
     # Also split Tesseract text on newlines AND exercise labels
+    # Preserve labels so we can sort by them later
     text_parts = []
+    text_labels = []  # parallel list of letter labels (or None)
     if raw_text:
         for line in raw_text.split("\n"):
             line = line.strip()
@@ -502,21 +511,32 @@ def parse_exercise(raw_text: str, math_ocr_text: Optional[str] = None) -> dict:
                 line,
             )
             for lp in label_parts:
-                lp = re.sub(r"^[a-z]\)\s*", "", lp.strip())
-                if lp:
-                    text_parts.append(lp)
+                # Extract the letter label before stripping it
+                label_match = re.match(r"^([a-f])\)\s*", lp.strip())
+                label = label_match.group(1) if label_match else None
+                lp_clean = re.sub(r"^[a-z]\)\s*", "", lp.strip())
+                if lp_clean:
+                    text_parts.append(lp_clean)
+                    text_labels.append(label)
 
     # Combine: math parts first (higher quality for equations), then text parts
     candidates = math_parts + text_parts
 
     expressions = []
     equations = []
+    equation_labels = []  # parallel list of labels for equations
     unparsed = []
 
     for line in candidates:
         line = line.strip()
         if not line or len(line) < 2:
             continue
+
+        # Extract and strip letter label prefix (e.g., "a) 3x-2=x+2" → label="a")
+        label_prefix = re.match(r"^([a-f])\)\s*", line)
+        label = label_prefix.group(1) if label_prefix else None
+        if label_prefix:
+            line = line[label_prefix.end():]
 
         # Skip pure text lines (no digits or math symbols)
         if not re.search(r"[\d=+\-*/^√²³]", line):
@@ -530,6 +550,7 @@ def parse_exercise(raw_text: str, math_ocr_text: Optional[str] = None) -> dict:
             rhs = parse_math_input(rhs_str)
             if lhs is not None and rhs is not None:
                 equations.append((lhs, op, rhs))
+                equation_labels.append(label)
                 continue
 
         # Try to parse as expression
@@ -542,25 +563,38 @@ def parse_exercise(raw_text: str, math_ocr_text: Optional[str] = None) -> dict:
     # Deduplicate equations (same lhs-rhs pair)
     seen_eqs = set()
     unique_equations = []
-    for eq in equations:
+    unique_labels = []
+    for i, eq in enumerate(equations):
         lhs, op, rhs = eq
         key = (str(lhs), op, str(rhs))
         if key not in seen_eqs:
             seen_eqs.add(key)
             unique_equations.append(eq)
+            unique_labels.append(equation_labels[i] if i < len(equation_labels) else None)
     equations = unique_equations
+    equation_labels = unique_labels
 
     # Flag equations with garbled OCR characters (§, ©, ¶, etc.)
     # These are Tesseract artifacts when it can't read fractions properly
     GARLED_CHARS = set("§©¶†‡※")
     clean_equations = []
-    for eq in equations:
+    clean_labels = []
+    for eq, label in zip(equations, equation_labels):
         lhs_str, op, rhs_str = str(eq[0]), eq[1], str(eq[2])
         if any(c in lhs_str or c in rhs_str for c in GARLED_CHARS):
             unparsed.append(f"{lhs_str} {op} {rhs_str} (OCR garbled)")
         else:
             clean_equations.append(eq)
+            clean_labels.append(label)
     equations = clean_equations
+    equation_labels = clean_labels
+
+    # Sort equations by letter label (a < b < c < ...)
+    # Equations without a label go to the end
+    labeled = [(lbl, eq) for lbl, eq in zip(equation_labels, equations) if lbl]
+    unlabeled = [eq for lbl, eq in zip(equation_labels, equations) if not lbl]
+    labeled.sort(key=lambda x: x[0])
+    equations = [eq for _, eq in labeled] + unlabeled
 
     return {
         "raw": raw_text,
